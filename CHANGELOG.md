@@ -6,6 +6,8 @@ ships separately and is not listed here.
 
 ## Unreleased
 
+## 0.1.41 - 2026-09-10
+
 ### Added
 
 - The MCP server page is built around connecting a client: pick Claude Code, Claude Desktop, Cursor, VS Code, Windsurf or Zed and get that client's exact config, create a token in place and it is filled into the snippet, and a tool reference lists every tool and which ones need a Manage token.
