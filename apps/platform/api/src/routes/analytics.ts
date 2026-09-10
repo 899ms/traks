@@ -19,7 +19,7 @@ import {
   toLiveFilters,
 } from '@traks/shared';
 import { requireAuth } from '../middleware/auth';
-import { cacheTtlSeconds } from '../lib/cache-ttl';
+import { cacheTtlSeconds, freshTtlSeconds } from '../lib/cache-ttl';
 import { noteSiteView, INTERNAL_HEADER, getInternalToken } from '../lib/prewarm';
 import { siteAccessFilter } from '../lib/workspaces';
 import { sites, goals, funnels } from '../db/schema';
@@ -973,7 +973,7 @@ export async function fetchDashboard(
   }
 
   const range = resolvePeriod(period, queryTime(period), site.timezone);
-  const ttl = cacheTtlSeconds(period);
+  const ttl = freshTtlSeconds(period, range);
 
   const outcome = await runQueries(c, () =>
     Promise.all([
@@ -1105,7 +1105,7 @@ export const analyticsRoute = appWithBatch
     }
 
     const range = resolvePeriod(period, queryTime(period), site.timezone);
-    const ttl = cacheTtlSeconds(period);
+    const ttl = freshTtlSeconds(period, range);
 
     const outcome = await runQueries(c, () =>
       Promise.all([
@@ -1153,7 +1153,7 @@ export const analyticsRoute = appWithBatch
     }
 
     const range = resolvePeriod(period, queryTime(period), site.timezone);
-    const ttl = cacheTtlSeconds(period);
+    const ttl = freshTtlSeconds(period, range);
 
     const outcome = await runQueries(c, () =>
       cachedR2Sql<{ t: string; visitors: unknown; pageviews: unknown; sessions: unknown }>(
@@ -1218,7 +1218,7 @@ export const analyticsRoute = appWithBatch
     }
 
     const range = resolvePeriod(period, queryTime(period), site.timezone);
-    const ttl = cacheTtlSeconds(period);
+    const ttl = freshTtlSeconds(period, range);
 
     if (type !== 'top') {
       const outcome = await runQueries(c, () =>
@@ -1283,7 +1283,7 @@ export const analyticsRoute = appWithBatch
     }
 
     const range = resolvePeriod(period, queryTime(period), site.timezone);
-    const ttl = cacheTtlSeconds(period);
+    const ttl = freshTtlSeconds(period, range);
 
     const outcome = await runQueries(c, () =>
       cachedR2Sql<{ meta: string; clicks: unknown; visitors: unknown }>(
@@ -1330,7 +1330,7 @@ export const analyticsRoute = appWithBatch
     }
 
     const range = resolvePeriod(period, queryTime(period), site.timezone);
-    const ttl = cacheTtlSeconds(period);
+    const ttl = freshTtlSeconds(period, range);
 
     const outcome = await runQueries(c, () =>
       cachedBreakdown(c, ttl, site.siteId, range, filters, 'referrer')
@@ -1371,7 +1371,7 @@ export const analyticsRoute = appWithBatch
     }
 
     const range = resolvePeriod(period, queryTime(period), site.timezone);
-    const ttl = cacheTtlSeconds(period);
+    const ttl = freshTtlSeconds(period, range);
 
     const outcome = await runQueries(c, () =>
       cachedBreakdown(c, ttl, site.siteId, range, filters, 'ai')
@@ -1414,7 +1414,7 @@ export const analyticsRoute = appWithBatch
     }
 
     const range = resolvePeriod(period, queryTime(period), site.timezone);
-    const ttl = cacheTtlSeconds(period);
+    const ttl = freshTtlSeconds(period, range);
 
     const outcome = await runQueries(c, () =>
       cachedBreakdown(c, ttl, site.siteId, range, filters, `utm_${type}` as BreakdownDim)
@@ -1464,7 +1464,7 @@ export const analyticsRoute = appWithBatch
     }
 
     const range = resolvePeriod(period, queryTime(period), site.timezone);
-    const ttl = cacheTtlSeconds(period);
+    const ttl = freshTtlSeconds(period, range);
 
     const outcome = await runQueries(c, () =>
       cachedBreakdown(c, ttl, site.siteId, range, filters, type)
@@ -1516,7 +1516,7 @@ export const analyticsRoute = appWithBatch
     }
 
     const range = resolvePeriod(period, queryTime(period), site.timezone);
-    const ttl = cacheTtlSeconds(period);
+    const ttl = freshTtlSeconds(period, range);
 
     const outcome = await runQueries(c, () =>
       cachedBreakdown(c, ttl, site.siteId, range, filters, type === 'size' ? 'screen' : type)
@@ -1607,7 +1607,7 @@ export const analyticsRoute = appWithBatch
     }
 
     const range = resolvePeriod(period, queryTime(period), site.timezone);
-    const ttl = cacheTtlSeconds(period);
+    const ttl = freshTtlSeconds(period, range);
 
     const outcome = await runQueries(c, () =>
       Promise.all([
@@ -1700,7 +1700,7 @@ export const analyticsRoute = appWithBatch
     const outcome = await runQueries(c, () =>
       cachedR2Sql<Record<string, unknown>>(
         c,
-        cacheTtlSeconds(period),
+        freshTtlSeconds(period, range),
         buildFunnelQuery(site.siteId, range, funnel.steps, filters)
       )
     );
@@ -1842,7 +1842,7 @@ export const analyticsRoute = appWithBatch
     }
 
     const range = resolvePeriod(period, queryTime(period), site.timezone);
-    const ttl = cacheTtlSeconds(period);
+    const ttl = freshTtlSeconds(period, range);
 
     const outcome = await runQueries(c, () =>
       cachedR2Sql<{ name: string; count: unknown; total_value: unknown }>(
@@ -1887,7 +1887,7 @@ export const analyticsRoute = appWithBatch
     }
 
     const range = resolvePeriod(period, queryTime(period), site.timezone);
-    const ttl = cacheTtlSeconds(period);
+    const ttl = freshTtlSeconds(period, range);
 
     const outcome = await runQueries(c, () =>
       cachedR2Sql<{ meta: string; calls: unknown; total_ms: unknown }>(
@@ -1937,7 +1937,7 @@ export const analyticsRoute = appWithBatch
     }
 
     const range = resolvePeriod(period, queryTime(period), site.timezone);
-    const ttl = cacheTtlSeconds(period);
+    const ttl = freshTtlSeconds(period, range);
 
     const outcome = await runQueries(c, () =>
       cachedR2Sql<{ name: string; visitors: unknown; pageviews: unknown }>(
@@ -1984,7 +1984,7 @@ export const analyticsRoute = appWithBatch
     }
 
     const range = resolvePeriod(period, queryTime(period), site.timezone);
-    const ttl = cacheTtlSeconds(period);
+    const ttl = freshTtlSeconds(period, range);
 
     const outcome = await runQueries(c, () =>
       cachedR2Sql<{ meta: string; events: unknown }>(

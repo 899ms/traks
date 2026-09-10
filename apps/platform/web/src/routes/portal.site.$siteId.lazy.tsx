@@ -1155,6 +1155,23 @@ function SiteAnalyticsPage(): ReactElement {
   const bootstrapSettled =
     !useBootstrap || bootstrapQ.isError || (bootstrapQ.isSuccess && !bootstrapQ.isPlaceholderData);
 
+  // Prefetch 'yesterday' once today's bundle is on screen. Yesterday is the
+  // most-clicked period after today, and its first view each day is a cold
+  // R2 SQL fan-out (its SQL is day-bounded, so midnight mints a new cache
+  // key) - several seconds the viewer would otherwise wait for. Fetching it
+  // behind the live dashboard moves that scan off the click; the server
+  // cache makes every later prefetch a KV hit, so the cost is one scan set
+  // per site per day. Runs after the bundle settles so it never competes
+  // with the hot path, and only unfiltered (the bundle has no filtered form).
+  useEffect(() => {
+    if (period !== 'today' || hasFilters || !bootstrapSettled) return;
+    void queryClient.prefetchQuery({
+      queryKey: ['site-analytics', siteId, 'all', 'yesterday'],
+      queryFn: async () => api.getAllStats(siteId, 'yesterday'),
+      staleTime: getStaleTime('yesterday'),
+    });
+  }, [queryClient, siteId, period, hasFilters, bootstrapSettled]);
+
   // Per-tile parallel queries - each tile renders as its own request resolves.
   // Tabbed panels pass `enabled` so only the active tab's query runs (each
   // R2 SQL query is a paid distributed scan; don't fetch hidden tabs).
@@ -1195,6 +1212,14 @@ function SiteAnalyticsPage(): ReactElement {
   const timeseriesQ = useQuery(
     tileOpts(['timeseries'], () => api.getTimeseries(siteId, period, filters), true, true)
   );
+
+  // keepPreviousData means a period or filter switch leaves the previous
+  // view's numbers on screen while the new ones load. A cold R2 SQL fan-out
+  // takes several seconds, and a pill that highlights while nothing else
+  // moves reads as a dead click - so surface the in-flight switch: the
+  // refresh icon spins and the panels dim until the new rows land.
+  const switching =
+    bootstrapQ.isPlaceholderData || mainQ.isPlaceholderData || timeseriesQ.isPlaceholderData;
   // Pages panel: top pages or entry/exit pages (first/last page of each session)
   const topPagesQ = useQuery(
     tileOpts(
@@ -1518,7 +1543,9 @@ function SiteAnalyticsPage(): ReactElement {
               )}
               <IconTip label="Refresh data">
                 <button onClick={handleRefresh} className={SEG_BTN}>
-                  <RefreshCw className={`w-[15px] h-[15px] ${refreshing ? 'animate-spin' : ''}`} />
+                  <RefreshCw
+                    className={`w-[15px] h-[15px] ${refreshing || switching ? 'animate-spin' : ''}`}
+                  />
                 </button>
               </IconTip>
               {canManage && (
@@ -1563,262 +1590,269 @@ function SiteAnalyticsPage(): ReactElement {
           <FilterChips filters={filters} onRemove={removeFilter} onClear={clearFilters} />
         )}
 
-        {/* Main chart card: metric tiles + timeseries */}
-        <ChartCard
-          stats={(mainQ.data as any)?.data}
-          statsLoading={mainQ.isLoading}
-          statsError={mainQ.isError}
-          timeseries={(timeseriesQ.data as any)?.data}
-          timeseriesLoading={timeseriesQ.isLoading}
-          timeseriesError={timeseriesQ.isError}
-          metric={chartMetric}
-          onMetricChange={setChartMetric}
-          period={period}
-        />
-
-        {/* Pages + Sources */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <PanelCard
-            title="Top Pages"
-            labelHeader={
-              pagesTab === 'top' ? 'Page' : pagesTab === 'entry' ? 'Entry page' : 'Exit page'
-            }
-            items={(pagesQ.data as any)?.data}
-            isLoading={pagesQ.isLoading}
-            isError={pagesQ.isError}
-            showPageviews={pagesTab === 'top'}
-            tabs={[
-              { key: 'top', label: 'Pages' },
-              { key: 'entry', label: 'Entry' },
-              { key: 'exit', label: 'Exit' },
-            ]}
-            activeTab={pagesTab}
-            onTabChange={setPagesTab}
-            onItemClick={item => setFilter('page', item.name)}
+        {/* Dimmed while a period/filter switch still shows the previous
+            view's rows (see `switching`). */}
+        <div
+          className={`space-y-6 transition-opacity duration-300 ${switching ? 'opacity-50' : ''}`}
+          aria-busy={switching}
+        >
+          {/* Main chart card: metric tiles + timeseries */}
+          <ChartCard
+            stats={(mainQ.data as any)?.data}
+            statsLoading={mainQ.isLoading}
+            statsError={mainQ.isError}
+            timeseries={(timeseriesQ.data as any)?.data}
+            timeseriesLoading={timeseriesQ.isLoading}
+            timeseriesError={timeseriesQ.isError}
+            metric={chartMetric}
+            onMetricChange={setChartMetric}
+            period={period}
           />
-          <PanelCard
-            title="Top Sources"
-            labelHeader={sourceTab === 'ai' ? 'AI Assistant' : 'Source'}
-            items={(sourceQ.data as any)?.data}
-            isLoading={sourceQ.isLoading}
-            isError={sourceQ.isError}
-            emptyText={sourceTab === 'ai' ? 'No AI traffic yet' : undefined}
-            tabs={[
-              { key: 'referrers', label: 'Referrers' },
-              { key: 'utm_source', label: 'UTM Source' },
-              { key: 'utm_medium', label: 'Medium' },
-              { key: 'utm_campaign', label: 'Campaign' },
-              { key: 'ai', label: 'AI' },
-            ]}
-            activeTab={sourceTab}
-            onTabChange={setSourceTab}
-            onItemClick={
-              // AI rows are assistant names spanning several referrer
-              // hostnames - no single exact-match filter value exists.
-              sourceTab === 'ai'
-                ? undefined
-                : item => {
-                    const keyByTab: Record<string, keyof AnalyticsFilters> = {
-                      referrers: 'source',
-                      utm_source: 'utmSource',
-                      utm_medium: 'utmMedium',
-                      utm_campaign: 'utmCampaign',
-                    };
-                    setFilter(keyByTab[sourceTab], item.name);
-                  }
-            }
-          />
-        </div>
 
-        {/* Below-fold sentinel + lazy-rendered sections */}
-        <div ref={belowFoldRef} />
-        {belowFoldVisible && (
-          <>
-            {/* Locations + Devices */}
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-              <PanelCard
-                title="Locations"
-                labelHeader={
-                  locationTab === 'country'
-                    ? 'Country'
-                    : locationTab === 'region'
-                      ? 'Region'
-                      : 'City'
-                }
-                items={locationItems}
-                isLoading={locationQ.isLoading}
-                isError={locationQ.isError}
-                tabs={[
-                  { key: 'country', label: 'Countries' },
-                  { key: 'region', label: 'Regions' },
-                  { key: 'city', label: 'Cities' },
-                ]}
-                activeTab={locationTab}
-                onTabChange={setLocationTab}
-                onItemClick={item =>
-                  setFilter(
+          {/* Pages + Sources */}
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <PanelCard
+              title="Top Pages"
+              labelHeader={
+                pagesTab === 'top' ? 'Page' : pagesTab === 'entry' ? 'Entry page' : 'Exit page'
+              }
+              items={(pagesQ.data as any)?.data}
+              isLoading={pagesQ.isLoading}
+              isError={pagesQ.isError}
+              showPageviews={pagesTab === 'top'}
+              tabs={[
+                { key: 'top', label: 'Pages' },
+                { key: 'entry', label: 'Entry' },
+                { key: 'exit', label: 'Exit' },
+              ]}
+              activeTab={pagesTab}
+              onTabChange={setPagesTab}
+              onItemClick={item => setFilter('page', item.name)}
+            />
+            <PanelCard
+              title="Top Sources"
+              labelHeader={sourceTab === 'ai' ? 'AI Assistant' : 'Source'}
+              items={(sourceQ.data as any)?.data}
+              isLoading={sourceQ.isLoading}
+              isError={sourceQ.isError}
+              emptyText={sourceTab === 'ai' ? 'No AI traffic yet' : undefined}
+              tabs={[
+                { key: 'referrers', label: 'Referrers' },
+                { key: 'utm_source', label: 'UTM Source' },
+                { key: 'utm_medium', label: 'Medium' },
+                { key: 'utm_campaign', label: 'Campaign' },
+                { key: 'ai', label: 'AI' },
+              ]}
+              activeTab={sourceTab}
+              onTabChange={setSourceTab}
+              onItemClick={
+                // AI rows are assistant names spanning several referrer
+                // hostnames - no single exact-match filter value exists.
+                sourceTab === 'ai'
+                  ? undefined
+                  : item => {
+                      const keyByTab: Record<string, keyof AnalyticsFilters> = {
+                        referrers: 'source',
+                        utm_source: 'utmSource',
+                        utm_medium: 'utmMedium',
+                        utm_campaign: 'utmCampaign',
+                      };
+                      setFilter(keyByTab[sourceTab], item.name);
+                    }
+              }
+            />
+          </div>
+
+          {/* Below-fold sentinel + lazy-rendered sections */}
+          <div ref={belowFoldRef} />
+          {belowFoldVisible && (
+            <>
+              {/* Locations + Devices */}
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                <PanelCard
+                  title="Locations"
+                  labelHeader={
                     locationTab === 'country'
-                      ? 'country'
+                      ? 'Country'
                       : locationTab === 'region'
-                        ? 'region'
-                        : 'city',
-                    item.name
-                  )
-                }
-              />
-              <PanelCard
-                title="Devices"
-                labelHeader={
-                  deviceTab === 'browser'
-                    ? 'Browser'
-                    : deviceTab === 'os'
-                      ? 'OS'
-                      : deviceTab === 'device'
-                        ? 'Device'
-                        : 'Size'
-                }
-                items={deviceItems}
-                showPercentage
-                isLoading={deviceQ.isLoading}
-                isError={deviceQ.isError}
-                tabs={[
-                  { key: 'browser', label: 'Browser' },
-                  { key: 'os', label: 'OS' },
-                  { key: 'device', label: 'Device' },
-                  { key: 'size', label: 'Size' },
-                ]}
-                activeTab={deviceTab}
-                onTabChange={setDeviceTab}
-                onItemClick={
-                  // Screen-size buckets are computed, not a stored column - no filter.
-                  deviceTab === 'size'
-                    ? undefined
-                    : item =>
-                        setFilter(
-                          deviceTab === 'browser'
-                            ? 'browser'
-                            : deviceTab === 'os'
-                              ? 'os'
-                              : 'device',
-                          item.name
-                        )
-                }
-              />
-            </div>
+                        ? 'Region'
+                        : 'City'
+                  }
+                  items={locationItems}
+                  isLoading={locationQ.isLoading}
+                  isError={locationQ.isError}
+                  tabs={[
+                    { key: 'country', label: 'Countries' },
+                    { key: 'region', label: 'Regions' },
+                    { key: 'city', label: 'Cities' },
+                  ]}
+                  activeTab={locationTab}
+                  onTabChange={setLocationTab}
+                  onItemClick={item =>
+                    setFilter(
+                      locationTab === 'country'
+                        ? 'country'
+                        : locationTab === 'region'
+                          ? 'region'
+                          : 'city',
+                      item.name
+                    )
+                  }
+                />
+                <PanelCard
+                  title="Devices"
+                  labelHeader={
+                    deviceTab === 'browser'
+                      ? 'Browser'
+                      : deviceTab === 'os'
+                        ? 'OS'
+                        : deviceTab === 'device'
+                          ? 'Device'
+                          : 'Size'
+                  }
+                  items={deviceItems}
+                  showPercentage
+                  isLoading={deviceQ.isLoading}
+                  isError={deviceQ.isError}
+                  tabs={[
+                    { key: 'browser', label: 'Browser' },
+                    { key: 'os', label: 'OS' },
+                    { key: 'device', label: 'Device' },
+                    { key: 'size', label: 'Size' },
+                  ]}
+                  activeTab={deviceTab}
+                  onTabChange={setDeviceTab}
+                  onItemClick={
+                    // Screen-size buckets are computed, not a stored column - no filter.
+                    deviceTab === 'size'
+                      ? undefined
+                      : item =>
+                          setFilter(
+                            deviceTab === 'browser'
+                              ? 'browser'
+                              : deviceTab === 'os'
+                                ? 'os'
+                                : 'device',
+                            item.name
+                          )
+                  }
+                />
+              </div>
 
-            {/* Goal conversions, custom events, and auto-tracked links,
+              {/* Goal conversions, custom events, and auto-tracked links,
                 each a full-width tile: events are business actions with a
                 props drill-down; outbound/downloads share one card as tabs
                 since they're the same shape (URL + clicks). */}
-            <GoalsPanel
-              goals={(goalStatsQ.data as any)?.data}
-              isLoading={goalStatsQ.isLoading}
-              isError={goalStatsQ.isError}
-              onAdd={canManage ? () => setGoalForm({ goal: null }) : undefined}
-              onManage={canManage ? () => setGoalsOpen(true) : undefined}
-            />
-            {selectedEvent === null ? (
-              <PanelCard
-                title="Custom Events"
-                labelHeader="Event"
-                valueHeader="Count"
-                items={events?.map(e => ({ name: e.name, visitors: e.count }))}
-                isLoading={eventsQ.isLoading}
-                isError={eventsQ.isError}
-                emptyText="No custom events yet"
-                onItemClick={item => setSelectedEvent(item.name)}
+              <GoalsPanel
+                goals={(goalStatsQ.data as any)?.data}
+                isLoading={goalStatsQ.isLoading}
+                isError={goalStatsQ.isError}
+                onAdd={canManage ? () => setGoalForm({ goal: null }) : undefined}
+                onManage={canManage ? () => setGoalsOpen(true) : undefined}
               />
-            ) : (
+              {selectedEvent === null ? (
+                <PanelCard
+                  title="Custom Events"
+                  labelHeader="Event"
+                  valueHeader="Count"
+                  items={events?.map(e => ({ name: e.name, visitors: e.count }))}
+                  isLoading={eventsQ.isLoading}
+                  isError={eventsQ.isError}
+                  emptyText="No custom events yet"
+                  onItemClick={item => setSelectedEvent(item.name)}
+                />
+              ) : (
+                <PanelCard
+                  title={selectedEvent}
+                  labelHeader="Property"
+                  valueHeader="Events"
+                  items={(
+                    (eventPropsQ.data as any)?.data as
+                      | { key: string; value: string; events: number }[]
+                      | undefined
+                  )?.map(p => ({
+                    name: `${p.key}: ${p.value}`,
+                    visitors: p.events,
+                  }))}
+                  isLoading={eventPropsQ.isLoading}
+                  isError={eventPropsQ.isError}
+                  emptyText="No properties on this event"
+                  headerAction={
+                    <button
+                      onClick={() => setSelectedEvent(null)}
+                      className="ml-auto shrink-0 rounded-full bg-muted px-3 py-1 text-[11px] font-semibold text-foreground hover:bg-muted transition-colors cursor-pointer"
+                    >
+                      ← All events
+                    </button>
+                  }
+                />
+              )}
               <PanelCard
-                title={selectedEvent}
-                labelHeader="Property"
-                valueHeader="Events"
-                items={(
-                  (eventPropsQ.data as any)?.data as
-                    | { key: string; value: string; events: number }[]
-                    | undefined
-                )?.map(p => ({
-                  name: `${p.key}: ${p.value}`,
-                  visitors: p.events,
-                }))}
-                isLoading={eventPropsQ.isLoading}
-                isError={eventPropsQ.isError}
-                emptyText="No properties on this event"
-                headerAction={
-                  <button
-                    onClick={() => setSelectedEvent(null)}
-                    className="ml-auto shrink-0 rounded-full bg-muted px-3 py-1 text-[11px] font-semibold text-foreground hover:bg-muted transition-colors cursor-pointer"
-                  >
-                    ← All events
-                  </button>
+                title="Links"
+                labelHeader="URL"
+                items={(linkQ.data as any)?.data}
+                isLoading={linkQ.isLoading}
+                isError={linkQ.isError}
+                tabs={LINK_TABS}
+                activeTab={linkTab}
+                onTabChange={setLinkTab}
+                emptyText={
+                  linkTab === 'outbound' ? 'No outbound clicks yet' : 'No file downloads yet'
                 }
               />
-            )}
-            <PanelCard
-              title="Links"
-              labelHeader="URL"
-              items={(linkQ.data as any)?.data}
-              isLoading={linkQ.isLoading}
-              isError={linkQ.isError}
-              tabs={LINK_TABS}
-              activeTab={linkTab}
-              onTabChange={setLinkTab}
-              emptyText={
-                linkTab === 'outbound' ? 'No outbound clicks yet' : 'No file downloads yet'
-              }
-            />
 
-            {/* WebMCP tool calls: agent invocations of tools the page exposes
+              {/* WebMCP tool calls: agent invocations of tools the page exposes
                 via document.modelContext, auto-tracked by the tracker's
                 registerTool wrapper as reserved custom events. Rows that had
                 failures show the error count next to the tool name. */}
-            <PanelCard
-              title="Agent Tools (WebMCP)"
-              labelHeader="Tool"
-              valueHeader="Calls"
-              items={(
-                (webmcpQ.data as any)?.data as
-                  | { name: string; calls: number; errors: number; avgMs: number }[]
-                  | undefined
-              )?.map(t => ({
-                name: t.errors > 0 ? `${t.name} · ${t.errors} failed` : t.name,
-                visitors: t.calls,
-              }))}
-              isLoading={webmcpQ.isLoading}
-              isError={webmcpQ.isError}
-              emptyText="No agent tool calls yet"
-            />
+              <PanelCard
+                title="Agent Tools (WebMCP)"
+                labelHeader="Tool"
+                valueHeader="Calls"
+                items={(
+                  (webmcpQ.data as any)?.data as
+                    | { name: string; calls: number; errors: number; avgMs: number }[]
+                    | undefined
+                )?.map(t => ({
+                  name: t.errors > 0 ? `${t.name} · ${t.errors} failed` : t.name,
+                  visitors: t.calls,
+                }))}
+                isLoading={webmcpQ.isLoading}
+                isError={webmcpQ.isError}
+                emptyText="No agent tool calls yet"
+              />
 
-            {/* Bot traffic: counted at ingest under its own event type, so
+              {/* Bot traffic: counted at ingest under its own event type, so
                 it never touches the human metrics above. Value shown is
                 distinct visitors per bot (crawlers, AI agents, monitors). */}
-            <PanelCard
-              title="Bots"
-              labelHeader="Bot"
-              valueHeader="Visitors"
-              items={(
-                (botsQ.data as any)?.data as
-                  | { name: string; visitors: number; pageviews: number }[]
-                  | undefined
-              )?.map(b => ({ name: b.name, visitors: b.visitors }))}
-              isLoading={botsQ.isLoading}
-              isError={botsQ.isError}
-              emptyText="No bot visits yet"
-            />
+              <PanelCard
+                title="Bots"
+                labelHeader="Bot"
+                valueHeader="Visitors"
+                items={(
+                  (botsQ.data as any)?.data as
+                    | { name: string; visitors: number; pageviews: number }[]
+                    | undefined
+                )?.map(b => ({ name: b.name, visitors: b.visitors }))}
+                isLoading={botsQ.isLoading}
+                isError={botsQ.isError}
+                emptyText="No bot visits yet"
+              />
 
-            {/* Funnels */}
-            <FunnelsPanel
-              funnels={funnelsQ.isLoading ? undefined : funnelList}
-              selectedId={activeFunnelId}
-              onSelect={setSelectedFunnelId}
-              stat={(funnelStatsQ.data as any)?.data as FunnelStat | undefined}
-              isLoading={funnelStatsQ.isLoading}
-              isError={funnelStatsQ.isError || funnelsQ.isError}
-              onAdd={canManage ? () => setFunnelForm({ funnel: null }) : undefined}
-              onManage={canManage ? () => setFunnelsOpen(true) : undefined}
-            />
-          </>
-        )}
+              {/* Funnels */}
+              <FunnelsPanel
+                funnels={funnelsQ.isLoading ? undefined : funnelList}
+                selectedId={activeFunnelId}
+                onSelect={setSelectedFunnelId}
+                stat={(funnelStatsQ.data as any)?.data as FunnelStat | undefined}
+                isLoading={funnelStatsQ.isLoading}
+                isError={funnelStatsQ.isError || funnelsQ.isError}
+                onAdd={canManage ? () => setFunnelForm({ funnel: null }) : undefined}
+                onManage={canManage ? () => setFunnelsOpen(true) : undefined}
+              />
+            </>
+          )}
+        </div>
       </div>
 
       <EditSiteModal
