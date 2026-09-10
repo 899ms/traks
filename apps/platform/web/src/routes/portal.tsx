@@ -12,6 +12,7 @@ import {
   Trash2,
   AlertTriangle,
   ExternalLink,
+  Mail,
 } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { destroyUrl, updateUrl, useInstanceConfig, useLatestVersion } from '@/lib/config';
@@ -322,6 +323,13 @@ function UserMenu(): React.ReactNode {
           >
             <Bot className="w-4 h-4 text-[#9B9590]" />
             MCP server &amp; tokens
+          </DropdownMenuItem>
+
+          <DropdownMenuItem asChild className="flex items-center gap-3 px-4 py-2.5 cursor-pointer">
+            <a href="mailto:hello@traks.dev">
+              <Mail className="w-4 h-4 text-[#9B9590]" />
+              Contact us
+            </a>
           </DropdownMenuItem>
 
           {config?.version && (

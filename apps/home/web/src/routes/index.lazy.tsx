@@ -13,6 +13,7 @@ import {
   Filter,
   Funnel,
   Globe,
+  Mail,
   MapPin,
   MousePointerClick,
   Play,
@@ -781,6 +782,34 @@ function LandingPage(): ReactElement {
           </motion.div>
         </section>
 
+        {/* contact */}
+        <section
+          id="contact"
+          className="scroll-mt-16 mx-auto w-full max-w-[1060px] px-6 py-16 sm:py-20"
+        >
+          <motion.div {...rise()}>
+            <SectionRule n="07" label="Get in touch" />
+            <div className="mt-8 flex flex-wrap items-end justify-between gap-6">
+              <div>
+                <h2 className="max-w-[26ch] text-[28px] font-bold leading-tight tracking-[-0.02em] sm:text-[36px]">
+                  Questions, ideas, something broken?
+                </h2>
+                <p className="mt-4 max-w-[62ch] text-[13.5px] leading-relaxed text-[#6E6C7C]">
+                  A deploy that will not come up, a metric that looks wrong, a feature you wish
+                  existed. Write to us.
+                </p>
+              </div>
+              <a
+                href="mailto:hello@traks.dev"
+                className="inline-flex h-11 items-center gap-2.5 rounded-full border border-[#E6E4DE] bg-white px-5 text-[13.5px] font-semibold text-[#3D3B4F] transition-colors hover:bg-[#F2F1ED]"
+              >
+                <Mail className="h-4 w-4 text-[#9B9590]" strokeWidth={1.8} />
+                hello@traks.dev
+              </a>
+            </div>
+          </motion.div>
+        </section>
+
         {/* CTA */}
         <section className="mx-auto w-full max-w-[1060px] px-6 pb-24 pt-8">
           <motion.div
@@ -844,6 +873,12 @@ function LandingPage(): ReactElement {
               className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#8C8A99] transition-colors hover:text-[#3D3B4F]"
             >
               Changelog
+            </a>
+            <a
+              href="mailto:hello@traks.dev"
+              className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#8C8A99] transition-colors hover:text-[#3D3B4F]"
+            >
+              Contact
             </a>
             <MousePointerClick
               className="hidden h-3.5 w-3.5 text-[#D8D7DE] sm:block"

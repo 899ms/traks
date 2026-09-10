@@ -6,6 +6,16 @@ ships separately and is not listed here.
 
 ## Unreleased
 
+### Added
+
+- The MCP server page is built around connecting a client: pick Claude Code, Claude Desktop, Cursor, VS Code, Windsurf or Zed and get that client's exact config, create a token in place and it is filled into the snippet, and a tool reference lists every tool and which ones need a Manage token.
+- "Contact us" in the account menu opens a mail to hello@traks.dev.
+
+### Changed
+
+- Switching the period no longer looks like a dead click: the refresh icon spins and the panels dim while the new period's numbers load.
+- "Yesterday" is scanned once per day instead of every 15 minutes, and the dashboard prefetches it behind today's view so the first click of the day is instant.
+
 ## 0.1.40 - 2026-09-04
 
 ### Changed
