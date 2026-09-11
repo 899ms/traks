@@ -1,5 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 
+/** Public source repository (MIT). Linked from the landing page header, hero and footer. */
+export const GITHUB_URL = 'https://github.com/shivamanupadi/traks';
+
 /** Example collect hostname for docs/marketing snippets - every install gets
  *  its own (wizard: `<sub>-collect.<domain>` or `<name>-collect.workers.dev`). */
 export const EXAMPLE_COLLECT_URL = 'https://analytics-collect.your-domain.com';

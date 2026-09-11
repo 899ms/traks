@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react';
 import { createLazyFileRoute } from '@tanstack/react-router';
-import { EXAMPLE_API_URL, EXAMPLE_COLLECT_URL, useLatestVersion } from '@/lib/config';
+import { EXAMPLE_API_URL, EXAMPLE_COLLECT_URL, GITHUB_URL, useLatestVersion } from '@/lib/config';
 import { motion } from 'framer-motion';
 import {
   ArrowRight,
@@ -57,6 +57,14 @@ function Mono({
     <span className={`font-mono text-[11px] font-medium uppercase tracking-[0.14em] ${className}`}>
       {children}
     </span>
+  );
+}
+
+function GitHubMark({ className }: { className?: string }): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor" className={className}>
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z" />
+    </svg>
   );
 }
 
@@ -390,6 +398,15 @@ function LandingPage(): ReactElement {
               >
                 Changelog
               </a>
+              <a
+                href={GITHUB_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-md px-3 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#6E6C7C] transition-colors hover:text-[#3D3B4F]"
+              >
+                <GitHubMark className="h-3.5 w-3.5" />
+                GitHub
+              </a>
             </div>
             <a
               href="/deploy"
@@ -474,7 +491,15 @@ function LandingPage(): ReactElement {
           >
             <Mono className="text-[#B3B1BE]">
               No cookies&ensp;·&ensp;No consent banner&ensp;·&ensp;1.5 KB script&ensp;·&ensp;Free
-              forever
+              forever&ensp;·&ensp;
+              <a
+                href={GITHUB_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[#8C8A99] underline decoration-[#D8D7DE] underline-offset-4 transition-colors hover:text-[#3D3B4F]"
+              >
+                Open source, MIT
+              </a>
             </Mono>
           </motion.div>
 
@@ -739,8 +764,20 @@ function LandingPage(): ReactElement {
                 traks.dev wizard signs in with Cloudflare, deploys into your own account, stores
                 events in your own bucket, and serves the dashboard from your own domain.
                 Cloudflare&rsquo;s $5/mo Workers plan covers millions of events, updates are one
-                click from the same wizard, and if you ever leave, the data is already yours.
+                click from the same wizard, and if you ever leave, the data is already yours. The
+                whole platform is open source under the MIT license, so you can read every line that
+                touches your traffic.
               </p>
+              <a
+                href={GITHUB_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-4 inline-flex items-center gap-2 text-[13px] font-semibold text-[#3D3B4F] transition-colors hover:text-[#2C2B3B]"
+              >
+                <GitHubMark className="h-4 w-4" />
+                shivamanupadi/traks on GitHub
+                <ArrowUpRight className="h-3.5 w-3.5 text-[#8C8A99]" strokeWidth={2} />
+              </a>
               <div className="mt-6 flex flex-wrap gap-2">
                 {STACK.map(s => (
                   <span
@@ -880,13 +917,20 @@ function LandingPage(): ReactElement {
             >
               Contact
             </a>
+            <a
+              href={GITHUB_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#8C8A99] transition-colors hover:text-[#3D3B4F]"
+            >
+              <GitHubMark className="h-3.5 w-3.5" />
+              GitHub
+            </a>
             <MousePointerClick
               className="hidden h-3.5 w-3.5 text-[#D8D7DE] sm:block"
               strokeWidth={1.6}
             />
-            <Mono className="text-[#B3B1BE]">
-              Privacy-first analytics · self-hosted on Cloudflare
-            </Mono>
+            <Mono className="text-[#B3B1BE]">Open source · MIT · self-hosted on Cloudflare</Mono>
           </div>
         </div>
       </footer>
