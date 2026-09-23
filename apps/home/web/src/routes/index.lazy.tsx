@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react';
 import { createLazyFileRoute } from '@tanstack/react-router';
 import { EXAMPLE_API_URL, EXAMPLE_COLLECT_URL, GITHUB_URL, useLatestVersion } from '@/lib/config';
+import { ContactModal } from '@/contact/ContactModal';
 import { motion } from 'framer-motion';
 import {
   ArrowRight,
@@ -353,6 +354,8 @@ function FilmModal({ onClose }: { onClose: () => void }): ReactElement {
 
 function LandingPage(): ReactElement {
   const latestVersion = useLatestVersion();
+  const [contactOpen, setContactOpen] = useState(false);
+  const openContact = (): void => setContactOpen(true);
   const [filmOpen, setFilmOpen] = useState(false);
   const openFilm = (): void => {
     setFilmOpen(true);
@@ -398,6 +401,13 @@ function LandingPage(): ReactElement {
               >
                 Changelog
               </a>
+              <button
+                type="button"
+                onClick={openContact}
+                className="rounded-md px-3 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#6E6C7C] transition-colors hover:text-[#3D3B4F]"
+              >
+                Contact
+              </button>
               <a
                 href={GITHUB_URL}
                 target="_blank"
@@ -836,13 +846,14 @@ function LandingPage(): ReactElement {
                   existed. Write to us.
                 </p>
               </div>
-              <a
-                href="mailto:hello@traks.dev"
+              <button
+                type="button"
+                onClick={openContact}
                 className="inline-flex h-11 items-center gap-2.5 rounded-full border border-[#E6E4DE] bg-white px-5 text-[13.5px] font-semibold text-[#3D3B4F] transition-colors hover:bg-[#F2F1ED]"
               >
                 <Mail className="h-4 w-4 text-[#9B9590]" strokeWidth={1.8} />
-                hello@traks.dev
-              </a>
+                Contact us
+              </button>
             </div>
           </motion.div>
         </section>
@@ -911,12 +922,13 @@ function LandingPage(): ReactElement {
             >
               Changelog
             </a>
-            <a
-              href="mailto:hello@traks.dev"
+            <button
+              type="button"
+              onClick={openContact}
               className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#8C8A99] transition-colors hover:text-[#3D3B4F]"
             >
               Contact
-            </a>
+            </button>
             <a
               href={GITHUB_URL}
               target="_blank"
@@ -934,6 +946,8 @@ function LandingPage(): ReactElement {
           </div>
         </div>
       </footer>
+
+      <ContactModal open={contactOpen} onClose={() => setContactOpen(false)} />
     </div>
   );
 }
