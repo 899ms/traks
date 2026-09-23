@@ -6,6 +6,29 @@ ships separately and is not listed here.
 
 ## Unreleased
 
+## 0.1.42 - 2026-09-23
+
+### Added
+
+- Public dashboards: the new Share button on a site makes its dashboard public at `/share/<site id>`. Traffic is always shown; goals, funnels and custom events are each opt-in. Visitors can switch periods and filter, but never see the live view, links, bots or agent tools.
+- An API tokens tab lists your tokens with their scope, last use and creation date, shows a new token once with a copy button, and revokes a token after a confirmation.
+- "Contact us", in the account menu and as a new mail icon in the header, shows the contact details in place instead of opening a mail client.
+
+### Changed
+
+- Goals are scorecards: each goal's conversion rate over a bar filled to that rate, with edit, duplicate and delete in a menu on the tile.
+- Funnels show one column per step with the sessions lost since the previous step. The funnel form is one row per step, and steps can be reordered by dragging or with the arrow keys.
+- The All goals and All funnels drawers are cards with an always-visible menu, and opening a form from a drawer closes the drawer first.
+- Settings has a card per setting, says in words whether you are an owner or a member, and lists every site's timezone next to the current time in the chosen zone. Members now see the reporting timezone.
+- Tokens moved from the MCP server page to the API tokens tab, and the account menu links to traks.dev instead.
+- On the site dashboard, Custom events sit beside Links and Agent tools beside Bots, with Goals and Funnels closing the page.
+
+### Fixed
+
+- A goal could not be saved as a page visit if a property filter had been typed while it was an event goal.
+- The goal and funnel forms no longer flag empty fields before you type, and no longer jump while a property filter is half filled.
+- Switching workspaces in Settings no longer keeps the previous workspace's timezone selected.
+
 ## 0.1.41 - 2026-09-10
 
 ### Added
