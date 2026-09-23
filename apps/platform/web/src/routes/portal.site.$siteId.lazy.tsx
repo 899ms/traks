@@ -1035,8 +1035,12 @@ function SiteAnalyticsPage(): ReactElement {
   const [installOpen, setInstallOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [goalsOpen, setGoalsOpen] = useState(false);
-  // Add/edit goal form: null = closed, { goal: null } = add, { goal } = edit.
-  const [goalForm, setGoalForm] = useState<{ goal: GoalDef | null } | null>(null);
+  // Add/edit goal form: null = closed, { goal: null } = add (optionally
+  // prefilled from `draft`, e.g. a duplicate), { goal } = edit.
+  const [goalForm, setGoalForm] = useState<{
+    goal: GoalDef | null;
+    draft?: Omit<GoalDef, 'id'>;
+  } | null>(null);
   // Same pair for funnels: drawer list, add/edit form (opens over the drawer).
   const [funnelForm, setFunnelForm] = useState<{ funnel: FunnelDef | null } | null>(null);
   const [funnelsOpen, setFunnelsOpen] = useState(false);
@@ -1739,104 +1743,121 @@ function SiteAnalyticsPage(): ReactElement {
                 />
               </div>
 
-              {/* Goal conversions, custom events, and auto-tracked links,
-                each a full-width tile: events are business actions with a
-                props drill-down; outbound/downloads share one card as tabs
-                since they're the same shape (URL + clicks). */}
-              <GoalsPanel
-                goals={(goalStatsQ.data as any)?.data}
-                isLoading={goalStatsQ.isLoading}
-                isError={goalStatsQ.isError}
-                onAdd={canManage ? () => setGoalForm({ goal: null }) : undefined}
-                onManage={canManage ? () => setGoalsOpen(true) : undefined}
-              />
-              {selectedEvent === null ? (
+              {/* Custom events beside auto-tracked links: events are
+                business actions with a props drill-down; outbound/downloads
+                share one card as tabs since they're the same shape (URL +
+                clicks). */}
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                {selectedEvent === null ? (
+                  <PanelCard
+                    title="Custom Events"
+                    labelHeader="Event"
+                    valueHeader="Count"
+                    items={events?.map(e => ({ name: e.name, visitors: e.count }))}
+                    isLoading={eventsQ.isLoading}
+                    isError={eventsQ.isError}
+                    emptyText="No custom events yet"
+                    onItemClick={item => setSelectedEvent(item.name)}
+                  />
+                ) : (
+                  <PanelCard
+                    title={selectedEvent}
+                    labelHeader="Property"
+                    valueHeader="Events"
+                    items={(
+                      (eventPropsQ.data as any)?.data as
+                        | { key: string; value: string; events: number }[]
+                        | undefined
+                    )?.map(p => ({
+                      name: `${p.key}: ${p.value}`,
+                      visitors: p.events,
+                    }))}
+                    isLoading={eventPropsQ.isLoading}
+                    isError={eventPropsQ.isError}
+                    emptyText="No properties on this event"
+                    headerAction={
+                      <button
+                        onClick={() => setSelectedEvent(null)}
+                        className="ml-auto shrink-0 rounded-full bg-muted px-3 py-1 text-[11px] font-semibold text-foreground hover:bg-muted transition-colors cursor-pointer"
+                      >
+                        ← All events
+                      </button>
+                    }
+                  />
+                )}
                 <PanelCard
-                  title="Custom Events"
-                  labelHeader="Event"
-                  valueHeader="Count"
-                  items={events?.map(e => ({ name: e.name, visitors: e.count }))}
-                  isLoading={eventsQ.isLoading}
-                  isError={eventsQ.isError}
-                  emptyText="No custom events yet"
-                  onItemClick={item => setSelectedEvent(item.name)}
-                />
-              ) : (
-                <PanelCard
-                  title={selectedEvent}
-                  labelHeader="Property"
-                  valueHeader="Events"
-                  items={(
-                    (eventPropsQ.data as any)?.data as
-                      | { key: string; value: string; events: number }[]
-                      | undefined
-                  )?.map(p => ({
-                    name: `${p.key}: ${p.value}`,
-                    visitors: p.events,
-                  }))}
-                  isLoading={eventPropsQ.isLoading}
-                  isError={eventPropsQ.isError}
-                  emptyText="No properties on this event"
-                  headerAction={
-                    <button
-                      onClick={() => setSelectedEvent(null)}
-                      className="ml-auto shrink-0 rounded-full bg-muted px-3 py-1 text-[11px] font-semibold text-foreground hover:bg-muted transition-colors cursor-pointer"
-                    >
-                      ← All events
-                    </button>
+                  title="Links"
+                  labelHeader="URL"
+                  items={(linkQ.data as any)?.data}
+                  isLoading={linkQ.isLoading}
+                  isError={linkQ.isError}
+                  tabs={LINK_TABS}
+                  activeTab={linkTab}
+                  onTabChange={setLinkTab}
+                  emptyText={
+                    linkTab === 'outbound' ? 'No outbound clicks yet' : 'No file downloads yet'
                   }
                 />
-              )}
-              <PanelCard
-                title="Links"
-                labelHeader="URL"
-                items={(linkQ.data as any)?.data}
-                isLoading={linkQ.isLoading}
-                isError={linkQ.isError}
-                tabs={LINK_TABS}
-                activeTab={linkTab}
-                onTabChange={setLinkTab}
-                emptyText={
-                  linkTab === 'outbound' ? 'No outbound clicks yet' : 'No file downloads yet'
-                }
-              />
+              </div>
 
               {/* WebMCP tool calls: agent invocations of tools the page exposes
                 via document.modelContext, auto-tracked by the tracker's
                 registerTool wrapper as reserved custom events. Rows that had
                 failures show the error count next to the tool name. */}
-              <PanelCard
-                title="Agent Tools (WebMCP)"
-                labelHeader="Tool"
-                valueHeader="Calls"
-                items={(
-                  (webmcpQ.data as any)?.data as
-                    | { name: string; calls: number; errors: number; avgMs: number }[]
-                    | undefined
-                )?.map(t => ({
-                  name: t.errors > 0 ? `${t.name} · ${t.errors} failed` : t.name,
-                  visitors: t.calls,
-                }))}
-                isLoading={webmcpQ.isLoading}
-                isError={webmcpQ.isError}
-                emptyText="No agent tool calls yet"
-              />
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                <PanelCard
+                  title="Agent Tools (WebMCP)"
+                  labelHeader="Tool"
+                  valueHeader="Calls"
+                  items={(
+                    (webmcpQ.data as any)?.data as
+                      | { name: string; calls: number; errors: number; avgMs: number }[]
+                      | undefined
+                  )?.map(t => ({
+                    name: t.errors > 0 ? `${t.name} · ${t.errors} failed` : t.name,
+                    visitors: t.calls,
+                  }))}
+                  isLoading={webmcpQ.isLoading}
+                  isError={webmcpQ.isError}
+                  emptyText="No agent tool calls yet"
+                />
 
-              {/* Bot traffic: counted at ingest under its own event type, so
+                {/* Bot traffic: counted at ingest under its own event type, so
                 it never touches the human metrics above. Value shown is
                 distinct visitors per bot (crawlers, AI agents, monitors). */}
-              <PanelCard
-                title="Bots"
-                labelHeader="Bot"
-                valueHeader="Visitors"
-                items={(
-                  (botsQ.data as any)?.data as
-                    | { name: string; visitors: number; pageviews: number }[]
-                    | undefined
-                )?.map(b => ({ name: b.name, visitors: b.visitors }))}
-                isLoading={botsQ.isLoading}
-                isError={botsQ.isError}
-                emptyText="No bot visits yet"
+                <PanelCard
+                  title="Bots"
+                  labelHeader="Bot"
+                  valueHeader="Visitors"
+                  items={(
+                    (botsQ.data as any)?.data as
+                      | { name: string; visitors: number; pageviews: number }[]
+                      | undefined
+                  )?.map(b => ({ name: b.name, visitors: b.visitors }))}
+                  isLoading={botsQ.isLoading}
+                  isError={botsQ.isError}
+                  emptyText="No bot visits yet"
+                />
+              </div>
+
+              {/* Goals, then funnels, close out the page */}
+              <GoalsPanel
+                siteId={siteId}
+                goals={(goalStatsQ.data as any)?.data}
+                isLoading={goalStatsQ.isLoading}
+                isError={goalStatsQ.isError}
+                onAdd={canManage ? () => setGoalForm({ goal: null }) : undefined}
+                onEdit={canManage ? goal => setGoalForm({ goal }) : undefined}
+                onDuplicate={
+                  canManage
+                    ? ({ id: _id, ...rest }) =>
+                        setGoalForm({
+                          goal: null,
+                          draft: { ...rest, name: `${rest.name.slice(0, 95)} copy` },
+                        })
+                    : undefined
+                }
+                onManage={canManage ? () => setGoalsOpen(true) : undefined}
               />
 
               {/* Funnels */}
@@ -1883,6 +1904,7 @@ function SiteAnalyticsPage(): ReactElement {
         siteId={siteId}
         domain={site?.domain}
         goal={goalForm?.goal ?? null}
+        draft={goalForm?.draft}
       />
 
       <FunnelsDrawer

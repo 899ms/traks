@@ -28,9 +28,9 @@ export interface GoalDef {
 
 type GoalType = GoalDef['type'];
 
-const TYPE_OPTIONS: { value: GoalType; label: string; hint: string }[] = [
-  { value: 'event', label: 'Custom event', hint: 'Sent from your code' },
-  { value: 'page', label: 'Page visit', hint: 'A URL or section' },
+const TYPE_OPTIONS: { value: GoalType; label: string }[] = [
+  { value: 'event', label: 'Custom event' },
+  { value: 'page', label: 'Page visit' },
 ];
 
 function Label({ children, extra }: { children: ReactNode; extra?: ReactNode }): ReactElement {
@@ -86,13 +86,14 @@ function rulePreview(
   );
 }
 
-/** Add or edit a single goal. `goal` null = add. */
+/** Add or edit a single goal. `goal` null = add, optionally prefilled from `draft`. */
 export function GoalFormModal({
   open,
   onOpenChange,
   siteId,
   domain,
   goal,
+  draft,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -100,6 +101,8 @@ export function GoalFormModal({
   /** Site domain, shown as the fixed prefix of the path field. */
   domain?: string;
   goal: GoalDef | null;
+  /** Starting values for a new goal, e.g. a duplicate of an existing one. */
+  draft?: Omit<GoalDef, 'id'> | null;
 }): ReactElement {
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
@@ -113,15 +116,16 @@ export function GoalFormModal({
 
   useEffect(() => {
     if (open) {
-      setName(goal?.name ?? '');
-      setType(goal?.type ?? 'event');
-      setTarget(goal?.target ?? '');
-      setPropKey(goal?.propKey ?? '');
-      setPropValue(goal?.propValue ?? '');
+      const init = goal ?? draft;
+      setName(init?.name ?? '');
+      setType(init?.type ?? 'event');
+      setTarget(init?.target ?? '');
+      setPropKey(init?.propKey ?? '');
+      setPropValue(init?.propValue ?? '');
       setError('');
       setTouched({});
     }
-  }, [open, goal]);
+  }, [open, goal, draft]);
 
   const saveGoal = useMutation({
     mutationFn: async () => {
@@ -150,9 +154,16 @@ export function GoalFormModal({
   // weeks later from an empty panel.
   const nameError = requiredTextError(name, 100, 'Goal name');
   const targetErr = targetError(type, target);
-  const propError = propPairError(type, propKey, propValue);
+  // Page goals never send a prop filter (see the save body), so a pair typed
+  // before switching to "Page visit" must not block saving from out of view.
+  const propError = type === 'event' ? propPairError(type, propKey, propValue) : null;
   const canSave = !nameError && !targetErr && !propError;
-  const preview = !targetErr && !propError ? rulePreview(type, target, propKey, propValue) : null;
+  // A half-typed prop pair reads back as the rule without it rather than
+  // hiding the line: the dialog is centered, so every height change here
+  // shifts the fields under the cursor.
+  const preview = !targetErr
+    ? rulePreview(type, target, propError ? '' : propKey, propError ? '' : propValue)
+    : null;
 
   const submit = (): void => {
     setTouched({ name: true, target: true, prop: true });
@@ -162,6 +173,12 @@ export function GoalFormModal({
     if (e.key === 'Enter') submit();
   };
   const clearError = (): void => setError('');
+  // Tabbing past an untouched field (or clicking the type toggle while the
+  // autofocused name is still blank) shouldn't flash "required": empty
+  // fields are flagged on submit instead.
+  const markTouched = (e: React.FocusEvent<HTMLInputElement>, field: 'name' | 'target'): void => {
+    if (e.currentTarget.value.trim()) setTouched(t => ({ ...t, [field]: true }));
+  };
 
   // Switching type: the target and prop filter mean something different, so
   // reset their touched state rather than flashing errors for the old type.
@@ -182,46 +199,36 @@ export function GoalFormModal({
 
         <DialogBody>
           <div className="space-y-4">
-            <div>
-              <Label>What counts</Label>
-              <div role="radiogroup" aria-label="Goal type" className="grid grid-cols-2 gap-2">
-                {TYPE_OPTIONS.map(opt => {
-                  const on = type === opt.value;
-                  return (
-                    <label
-                      key={opt.value}
-                      className={cn(
-                        'flex cursor-pointer items-start gap-3 rounded-[14px] border px-3.5 py-3 transition-colors',
-                        on ? 'border-[#3D3B4F] bg-white' : 'border-[#E6E4DE] hover:border-[#cbcad4]'
-                      )}
-                    >
-                      <input
-                        type="radio"
-                        name="goal-type"
-                        value={opt.value}
-                        checked={on}
-                        onChange={() => pickType(opt.value)}
-                        className="peer sr-only"
-                      />
-                      <span
-                        aria-hidden
-                        className={cn(
-                          'mt-[3px] flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-[1.5px] transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-[#3D3B4F]/30',
-                          on ? 'border-[#3D3B4F]' : 'border-[#B5B0AA]'
-                        )}
-                      >
-                        {on && <span className="h-2 w-2 rounded-full bg-[#3D3B4F]" />}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block text-[13px] font-semibold text-[#3D3B4F]">
-                          {opt.label}
-                        </span>
-                        <span className="block text-[12px] text-[#9B9590]">{opt.hint}</span>
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
+            <div
+              role="radiogroup"
+              aria-label="What counts"
+              className="grid grid-cols-2 gap-[3px] rounded-[13px] bg-[#F2F1ED] p-[3px]"
+            >
+              {TYPE_OPTIONS.map(opt => {
+                const on = type === opt.value;
+                return (
+                  <label
+                    key={opt.value}
+                    className={cn(
+                      'cursor-pointer rounded-[10px] py-1.5 text-center text-[12.5px] font-semibold transition-colors',
+                      'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-[#3D3B4F]/30',
+                      on
+                        ? 'bg-white text-[#3D3B4F] shadow-[0_0_0_1px_#E6E4DE]'
+                        : 'text-[#6E6C7C] hover:text-[#3D3B4F]'
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="goal-type"
+                      value={opt.value}
+                      checked={on}
+                      onChange={() => pickType(opt.value)}
+                      className="sr-only"
+                    />
+                    {opt.label}
+                  </label>
+                );
+              })}
             </div>
 
             <div>
@@ -235,7 +242,7 @@ export function GoalFormModal({
                   setName(e.target.value);
                   clearError();
                 }}
-                onBlur={() => setTouched(t => ({ ...t, name: true }))}
+                onBlur={e => markTouched(e, 'name')}
                 onKeyDown={onEnter}
                 className="h-10 px-4 text-[13px]"
                 autoFocus
@@ -256,7 +263,7 @@ export function GoalFormModal({
                       setTarget(e.target.value);
                       clearError();
                     }}
-                    onBlur={() => setTouched(t => ({ ...t, target: true }))}
+                    onBlur={e => markTouched(e, 'target')}
                     onKeyDown={onEnter}
                     className="h-10 px-4 text-[13px]"
                   />
@@ -276,7 +283,16 @@ export function GoalFormModal({
                 </div>
                 <div>
                   <Label extra="optional">Only when a property matches</Label>
-                  <div className="flex items-center gap-2">
+                  {/* Validated once focus leaves the pair: tabbing from key to
+                    value must not flag the value that's about to be typed. */}
+                  <div
+                    className="flex items-center gap-2"
+                    onBlur={e => {
+                      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                        setTouched(t => ({ ...t, prop: true }));
+                      }
+                    }}
+                  >
                     <Input
                       placeholder="e.g. reason"
                       value={propKey}
@@ -286,7 +302,6 @@ export function GoalFormModal({
                         setPropKey(e.target.value);
                         clearError();
                       }}
-                      onBlur={() => setTouched(t => ({ ...t, prop: true }))}
                       onKeyDown={onEnter}
                       className="h-10 px-4 text-[13px]"
                     />
@@ -300,7 +315,6 @@ export function GoalFormModal({
                         setPropValue(e.target.value);
                         clearError();
                       }}
-                      onBlur={() => setTouched(t => ({ ...t, prop: true }))}
                       onKeyDown={onEnter}
                       className="h-10 px-4 text-[13px]"
                     />
@@ -331,7 +345,7 @@ export function GoalFormModal({
                       setTarget(e.target.value);
                       clearError();
                     }}
-                    onBlur={() => setTouched(t => ({ ...t, target: true }))}
+                    onBlur={e => markTouched(e, 'target')}
                     onKeyDown={onEnter}
                     className="h-full min-w-0 flex-1 bg-transparent px-3 text-[13px] text-[#3D3B4F] outline-none placeholder:text-[#B5B0AA]"
                   />
@@ -348,12 +362,20 @@ export function GoalFormModal({
               </div>
             )}
 
-            {preview && (
-              <div className="flex items-start gap-2.5 rounded-[14px] bg-[#F9F8F6] px-3.5 py-2.5 text-[12.5px] text-[#6E6C7C]">
-                <span className="mt-[6px] h-2 w-2 shrink-0 rounded-full bg-[#28E99F]" />
-                <span>{preview}</span>
-              </div>
-            )}
+            <div className="flex items-start gap-2.5 rounded-[14px] bg-[#F9F8F6] px-3.5 py-2.5 text-[12.5px] text-[#6E6C7C]">
+              <span
+                className={cn(
+                  'mt-[6px] h-2 w-2 shrink-0 rounded-full',
+                  preview ? 'bg-[#28E99F]' : 'bg-[#E6E4DE]'
+                )}
+              />
+              <span className={cn(!preview && 'text-[#B5B0AA]')}>
+                {preview ??
+                  (target.trim()
+                    ? `Fix the ${type === 'event' ? 'event name' : 'path'} to see what counts.`
+                    : `Enter ${type === 'event' ? 'an event name' : 'a path'} to see what counts.`)}
+              </span>
+            </div>
             {error && <p className="text-[13px] text-[#e07a5f]">{error}</p>}
           </div>
         </DialogBody>

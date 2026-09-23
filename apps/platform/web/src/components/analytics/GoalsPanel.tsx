@@ -1,58 +1,87 @@
-import type { ReactElement } from 'react';
-import { Target, AlertCircle, Settings2, Plus } from 'lucide-react';
+import { useState, type ReactElement } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Target, AlertCircle, Plus, MoreHorizontal, Pencil, Copy, Trash2 } from 'lucide-react';
 import type { GoalStat } from '@traks/shared';
 import { cn, formatNumber } from '@/lib/utils';
+import { api } from '@/lib/api';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import type { GoalDef } from './GoalFormModal';
+import { TypeChip } from './TypeChip';
 
 interface GoalsPanelProps {
+  siteId: string;
   goals: GoalStat[] | undefined;
   isLoading: boolean;
   isError?: boolean;
-  /** Absent for view-only members: hides the manage affordances. */
+  /** The manage callbacks are absent for view-only members, which hides the
+   *  tile menus, the "New goal" tile, and "All goals". */
   onAdd?: () => void;
-  /** Absent for view-only members; hidden while no goals exist. */
+  onEdit?: (goal: GoalDef) => void;
+  onDuplicate?: (goal: GoalDef) => void;
   onManage?: () => void;
   className?: string;
 }
 
-/** Goal conversions panel: uniques, total, conversion rate over sage fill bars. */
+/** "signup · plan=pro" or "/docs/*": the rule a goal matches, in one line. */
+function ruleLabel(goal: GoalStat): string {
+  return goal.propKey && goal.propValue
+    ? `${goal.target} · ${goal.propKey}=${goal.propValue}`
+    : goal.target;
+}
+
+/**
+ * Goal scorecards: one tile per goal with its conversion rate up front and a
+ * meter filled to that rate. Each tile's menu edits, duplicates, or deletes
+ * it in place; "All goals" opens the goals drawer.
+ */
 export function GoalsPanel({
+  siteId,
   goals,
   isLoading,
   isError,
   onAdd,
+  onEdit,
+  onDuplicate,
   onManage,
   className,
 }: GoalsPanelProps): ReactElement {
-  const maxUniques = goals && goals.length > 0 ? Math.max(...goals.map(g => g.uniques), 1) : 1;
+  const queryClient = useQueryClient();
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState('');
+
+  const deleteGoal = useMutation({
+    mutationFn: async (goalId: string) => api.deleteGoal(siteId, goalId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['site-goals', siteId] });
+      queryClient.invalidateQueries({ queryKey: ['site-analytics', siteId, 'goals'] });
+      setConfirmId(null);
+    },
+    onError: (err: Error) => setDeleteError(err.message),
+  });
+
+  const canManage = Boolean(onEdit);
   const hasGoals = Boolean(goals && goals.length > 0);
+  // Every goal gets a tile: view-only members have no drawer to reach a
+  // capped-off remainder.
+  const sorted = [...(goals ?? [])].sort((a, b) => b.uniques - a.uniques);
 
   return (
     <div className={cn('rounded-[20px] bg-white p-6 shadow-float', className)}>
       <div className="mb-4 flex items-center justify-between gap-3">
-        <h3 className="text-[15px] font-bold tracking-[-0.01em] text-[#3D3B4F]">
-          Goal Conversions
-        </h3>
-        <div className="flex items-center gap-2">
-          {/* Manage only appears once there's something to manage. */}
-          {onManage && hasGoals && (
-            <button
-              onClick={onManage}
-              className="flex items-center gap-1.5 rounded-full bg-muted px-3.5 py-1.5 text-[12px] font-semibold text-foreground hover:bg-[#E6E4DE] transition-colors cursor-pointer"
-            >
-              <Settings2 className="h-3.5 w-3.5" />
-              Manage goals
-            </button>
-          )}
-          {onAdd && (
-            <button
-              onClick={onAdd}
-              className="flex items-center gap-1.5 rounded-full bg-[#3D3B4F] px-3.5 py-1.5 text-[12px] font-semibold text-white hover:bg-[#2C2B3B] transition-colors cursor-pointer"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Add goal
-            </button>
-          )}
-        </div>
+        <h3 className="text-[15px] font-bold tracking-[-0.01em] text-[#3D3B4F]">Goals</h3>
+        {onManage && hasGoals && (
+          <button
+            onClick={onManage}
+            className="rounded-full border border-[#E6E4DE] px-3.5 py-1.5 text-[12px] font-semibold text-[#6E6C7C] hover:bg-[#F2F1ED] hover:text-[#3D3B4F] transition-colors cursor-pointer"
+          >
+            All goals
+          </button>
+        )}
       </div>
 
       {isError ? (
@@ -61,12 +90,9 @@ export function GoalsPanel({
           <p className="text-[13px] text-[#e07a5f]">Failed to load goals</p>
         </div>
       ) : isLoading || !goals ? (
-        <div className="space-y-2.5">
-          {[85, 55, 30].map((w, i) => (
-            <div key={i} className="flex items-center justify-between gap-4">
-              <div className="h-6 animate-pulse rounded bg-muted" style={{ width: `${w}%` }} />
-              <div className="h-6 w-24 shrink-0 animate-pulse rounded bg-muted" />
-            </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {[0, 1, 2, 3].map(i => (
+            <div key={i} className="h-[124px] animate-pulse rounded-[14px] bg-muted" />
           ))}
         </div>
       ) : goals.length === 0 ? (
@@ -86,45 +112,122 @@ export function GoalsPanel({
           )}
         </div>
       ) : (
-        <div className="space-y-1">
-          <div className="flex items-center justify-between px-2.5 pb-1 text-[11px] font-medium uppercase tracking-wider text-[#B5B0AA]">
-            <span>Goal</span>
-            <div className="flex gap-5">
-              <span className="w-14 text-right">Uniques</span>
-              <span className="w-12 text-right">Total</span>
-              <span className="w-12 text-right">CR</span>
-            </div>
+        <>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {sorted.map(goal =>
+              confirmId === goal.id ? (
+                <div
+                  key={goal.id}
+                  className="flex min-h-[124px] flex-col justify-between rounded-[14px] bg-[#fdf1ed] p-3.5"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-[13px] font-semibold text-[#3D3B4F]">{goal.name}</p>
+                    <p className="mt-1 text-[12px] leading-snug text-[#e07a5f]">
+                      Delete this goal? Past reports keep its history.
+                    </p>
+                  </div>
+                  <div className="flex justify-end gap-1">
+                    <button
+                      onClick={() => setConfirmId(null)}
+                      className="rounded-full px-3 py-1 text-[12px] font-semibold text-[#6E6C7C] hover:bg-white transition-colors cursor-pointer"
+                    >
+                      Keep
+                    </button>
+                    <button
+                      onClick={() => deleteGoal.mutate(goal.id)}
+                      disabled={deleteGoal.isPending}
+                      className="rounded-full bg-[#e07a5f] px-3 py-1 text-[12px] font-semibold text-white hover:bg-[#c9694f] transition-colors cursor-pointer disabled:opacity-60"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  key={goal.id}
+                  className="min-w-0 rounded-[14px] bg-[#F9F8F6] p-3.5 transition-colors hover:bg-[#F2F1ED] focus-within:bg-[#F2F1ED]"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-[13px] font-semibold text-[#3D3B4F]">
+                        {goal.name}
+                      </p>
+                      <p
+                        className="mt-0.5 truncate text-[11.5px] text-[#9B9590]"
+                        title={ruleLabel(goal)}
+                      >
+                        {ruleLabel(goal)}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <TypeChip type={goal.type} />
+                      {canManage && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger
+                            aria-label={`${goal.name} options`}
+                            className="-mr-1 flex h-6 w-6 items-center justify-center rounded-lg text-[#B5B0AA] transition-colors hover:bg-[#E6E4DE] hover:text-[#3D3B4F] cursor-pointer"
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent className="w-36 border-0 shadow-float-lg">
+                            <DropdownMenuItem
+                              onClick={() => onEdit?.(goal)}
+                              className="text-[12.5px] text-[#3D3B4F]"
+                            >
+                              <Pencil className="h-3.5 w-3.5 text-[#6E6C7C]" />
+                              Edit
+                            </DropdownMenuItem>
+                            {onDuplicate && (
+                              <DropdownMenuItem
+                                onClick={() => onDuplicate(goal)}
+                                className="text-[12.5px] text-[#3D3B4F]"
+                              >
+                                <Copy className="h-3.5 w-3.5 text-[#6E6C7C]" />
+                                Duplicate
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setDeleteError('');
+                                setConfirmId(goal.id);
+                              }}
+                              className="text-[12.5px] text-[#e07a5f]"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Delete…
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                    </div>
+                  </div>
+                  <p className="mt-2.5 text-[24px] font-bold leading-none tracking-[-0.02em] tabular-nums text-[#3D3B4F]">
+                    {goal.conversionRate}%
+                  </p>
+                  <div className="mt-2.5 h-1 overflow-hidden rounded-full bg-[#E6E4DE]">
+                    <div
+                      className="h-full rounded-full bg-[#3D3B4F]"
+                      style={{ width: `${Math.min(goal.conversionRate, 100)}%` }}
+                    />
+                  </div>
+                  <p className="mt-2 text-[11.5px] tabular-nums text-[#9B9590]">
+                    {formatNumber(goal.uniques)} uniques · {formatNumber(goal.events)} total
+                  </p>
+                </div>
+              )
+            )}
+            {onAdd && (
+              <button
+                onClick={onAdd}
+                className="flex min-h-[124px] items-center justify-center gap-1.5 rounded-[14px] border-[1.5px] border-dashed border-[#E6E4DE] text-[12.5px] font-semibold text-[#9B9590] hover:border-[#cbcad4] hover:text-[#3D3B4F] transition-colors cursor-pointer"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                New goal
+              </button>
+            )}
           </div>
-
-          {goals.map(goal => (
-            <div
-              key={goal.id}
-              className="relative flex h-[30px] items-center justify-between rounded-md px-2.5"
-            >
-              <div
-                className="absolute inset-y-0 left-0 rounded-md bg-muted"
-                style={{ width: `${(goal.uniques / maxUniques) * 100}%` }}
-              />
-              <span className="relative z-10 flex items-center gap-2 truncate pr-4 text-[13px] text-[#3D3B4F]">
-                {goal.name}
-                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-[#9B9590]">
-                  {goal.type === 'event' ? goal.target : `visit ${goal.target}`}
-                  {goal.propKey && goal.propValue && (
-                    <>
-                      {' '}
-                      &middot; {goal.propKey}={goal.propValue}
-                    </>
-                  )}
-                </span>
-              </span>
-              <div className="relative z-10 flex shrink-0 gap-5 text-[13px] font-medium tabular-nums text-[#3D3B4F]">
-                <span className="w-14 text-right">{formatNumber(goal.uniques)}</span>
-                <span className="w-12 text-right">{formatNumber(goal.events)}</span>
-                <span className="w-12 text-right text-[#6E6C7C]">{goal.conversionRate}%</span>
-              </div>
-            </div>
-          ))}
-        </div>
+          {deleteError && <p className="pt-3 text-[13px] text-[#e07a5f]">{deleteError}</p>}
+        </>
       )}
     </div>
   );
