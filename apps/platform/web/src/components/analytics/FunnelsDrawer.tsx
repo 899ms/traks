@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactElement } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { Copy, Eye, MoreHorizontal, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import type { FunnelDef, FunnelStep } from '@traks/shared';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
@@ -12,18 +12,29 @@ import {
   DrawerBody,
   DrawerFooter,
 } from '@/components/ui/drawer';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { TypeChip } from './TypeChip';
 
 /** Search only earns its space once the list is long enough to lose things in. */
 const SEARCH_THRESHOLD = 8;
 
 function stepLabel(s: FunnelStep): string {
-  return s.propKey && s.propValue ? `${s.target} [${s.propKey}=${s.propValue}]` : s.target;
+  return s.propKey && s.propValue ? `${s.target} · ${s.propKey}=${s.propValue}` : s.target;
 }
+
+const MENU_ITEM =
+  'rounded-[10px] text-[12.5px] text-[#3D3B4F] hover:bg-[#F2F1ED] focus:bg-[#F2F1ED]';
 
 /**
  * Right-side drawer listing every funnel on the site. Adding and editing
- * open the FunnelFormModal on top of the drawer; delete is inline with a
- * second-click confirm. Same shape as GoalsDrawer.
+ * hand off to the FunnelFormModal (the dashboard closes the drawer first);
+ * delete is inline with a second-click confirm. Same shape as GoalsDrawer.
  */
 export function FunnelsDrawer({
   open,
@@ -31,8 +42,10 @@ export function FunnelsDrawer({
   siteId,
   siteLabel,
   selectedId,
+  onSelect,
   onAdd,
   onEdit,
+  onDuplicate,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -41,8 +54,11 @@ export function FunnelsDrawer({
   siteLabel?: string;
   /** The funnel currently shown in the panel, marked in the list. */
   selectedId?: string | null;
+  /** Shows the funnel in the dashboard panel. */
+  onSelect?: (id: string) => void;
   onAdd: () => void;
   onEdit: (funnel: FunnelDef) => void;
+  onDuplicate?: (funnel: FunnelDef) => void;
 }): ReactElement {
   const queryClient = useQueryClient();
   const [error, setError] = useState('');
@@ -87,7 +103,7 @@ export function FunnelsDrawer({
     : funnels;
 
   return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
+    <Drawer open={open} onOpenChange={onOpenChange} className="max-w-[460px]">
       <DrawerHeader onClose={() => onOpenChange(false)}>
         <div className="flex items-start justify-between gap-3 pr-2">
           <div className="min-w-0">
@@ -150,7 +166,7 @@ export function FunnelsDrawer({
           </p>
         )}
 
-        <ul className="-mx-1.5">
+        <ul className="space-y-2">
           {visible.map(funnel => {
             const confirming = confirmId === funnel.id;
             const isSelected = funnel.id === selectedId;
@@ -158,78 +174,125 @@ export function FunnelsDrawer({
               <li
                 key={funnel.id}
                 className={cn(
-                  'group flex items-center justify-between gap-3 rounded-xl px-1.5 py-2.5 transition-colors',
-                  'border-b border-[#E6E4DE] last:border-b-0 hover:border-transparent hover:bg-[#F9F8F6]',
-                  confirming && 'border-transparent bg-[#fdf1ed]'
+                  'rounded-[14px] p-3.5 transition-colors',
+                  confirming ? 'bg-[#fdf1ed]' : 'bg-[#F9F8F6] hover:bg-[#F2F1ED]'
                 )}
-                onMouseLeave={() => {
-                  if (confirming && !deleteFunnel.isPending) setConfirmId(null);
-                }}
               >
-                <button
-                  onClick={() => onEdit(funnel)}
-                  className="min-w-0 flex-1 cursor-pointer text-left"
-                  title="Edit funnel"
-                >
-                  <p className="flex items-center gap-1.5 text-[13px] font-medium text-[#3D3B4F]">
-                    <span className="truncate">{funnel.name}</span>
-                    {isSelected && (
-                      <span className="shrink-0 rounded-full bg-[#F2F1ED] px-[7px] text-[10.5px] font-medium text-[#6E6C7C]">
-                        showing
+                <div className="flex items-start justify-between gap-2">
+                  <button
+                    onClick={() => onEdit(funnel)}
+                    className="min-w-0 flex-1 cursor-pointer text-left"
+                    title="Edit funnel"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <span className="truncate text-[13.5px] font-semibold text-[#3D3B4F]">
+                        {funnel.name}
                       </span>
-                    )}
-                  </p>
-                  {confirming ? (
-                    <p className="mt-0.5 text-[11.5px] text-[#e07a5f]">
-                      Delete this funnel? Past reports keep its history.
-                    </p>
-                  ) : (
-                    <p className="mt-0.5 truncate text-[11.5px] text-[#9B9590]">
-                      {funnel.steps.map(stepLabel).join(' → ')}
-                    </p>
-                  )}
-                </button>
-
-                {confirming ? (
-                  <div className="flex shrink-0 items-center gap-1">
-                    <button
-                      onClick={() => setConfirmId(null)}
-                      className="rounded-full px-2.5 py-1 text-[12px] font-semibold text-[#6E6C7C] hover:bg-white transition-colors cursor-pointer"
-                    >
-                      Keep
-                    </button>
-                    <button
-                      onClick={() => deleteFunnel.mutate(funnel.id)}
-                      disabled={deleteFunnel.isPending}
-                      className="rounded-full bg-[#e07a5f] px-2.5 py-1 text-[12px] font-semibold text-white hover:bg-[#c9694f] transition-colors cursor-pointer disabled:opacity-60"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                ) : (
-                  <div className="relative flex shrink-0 items-center">
-                    <span className="text-[12px] tabular-nums text-[#9B9590] transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">
+                      {isSelected && (
+                        <span className="shrink-0 rounded-full bg-white px-[7px] text-[10.5px] font-medium text-[#6E6C7C] shadow-[0_0_0_1px_#E6E4DE]">
+                          on dashboard
+                        </span>
+                      )}
+                    </span>
+                    <span className="mt-0.5 block text-[11.5px] text-[#9B9590]">
                       {funnel.steps.length} steps
                     </span>
-                    <div className="absolute right-0 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                      <button
-                        onClick={() => onEdit(funnel)}
-                        className="flex h-7 w-7 items-center justify-center rounded-lg text-[#6E6C7C] hover:bg-[#E6E4DE] hover:text-[#3D3B4F] transition-colors cursor-pointer"
-                        title="Edit funnel"
-                        aria-label={`Edit ${funnel.name}`}
+                  </button>
+                  {!confirming && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        aria-label={`${funnel.name} options`}
+                        className="-mr-1 -mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[#9B9590] hover:bg-[#E6E4DE] hover:text-[#3D3B4F] transition-colors cursor-pointer"
                       >
-                        <Pencil className="h-3.5 w-3.5" />
+                        <MoreHorizontal className="h-4 w-4" />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent className="w-52 border-0 p-1.5 shadow-float-lg">
+                        <DropdownMenuItem onClick={() => onEdit(funnel)} className={MENU_ITEM}>
+                          <Pencil className="h-3.5 w-3.5 text-[#6E6C7C]" />
+                          Edit
+                        </DropdownMenuItem>
+                        {onSelect && !isSelected && (
+                          <DropdownMenuItem
+                            onClick={() => onSelect(funnel.id)}
+                            className={MENU_ITEM}
+                          >
+                            <Eye className="h-3.5 w-3.5 text-[#6E6C7C]" />
+                            Show on dashboard
+                          </DropdownMenuItem>
+                        )}
+                        {onDuplicate && (
+                          <DropdownMenuItem
+                            onClick={() => onDuplicate(funnel)}
+                            className={MENU_ITEM}
+                          >
+                            <Copy className="h-3.5 w-3.5 text-[#6E6C7C]" />
+                            Duplicate
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuSeparator className="bg-[#ECEBE6]" />
+                        <DropdownMenuItem
+                          onClick={() => {
+                            setError('');
+                            setConfirmId(funnel.id);
+                          }}
+                          className="rounded-[10px] text-[12.5px] text-[#e07a5f] hover:bg-[#fdf1ed] focus:bg-[#fdf1ed]"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Delete…
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                </div>
+
+                {confirming ? (
+                  <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-[12px] text-[#e07a5f]">
+                      Delete this funnel? Past reports keep its history.
+                    </p>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <button
+                        onClick={() => setConfirmId(null)}
+                        className="rounded-full px-3 py-1 text-[12px] font-semibold text-[#6E6C7C] hover:bg-white transition-colors cursor-pointer"
+                      >
+                        Keep
                       </button>
                       <button
-                        onClick={() => setConfirmId(funnel.id)}
-                        className="flex h-7 w-7 items-center justify-center rounded-lg text-[#e07a5f] hover:bg-[#e07a5f]/10 transition-colors cursor-pointer"
-                        title="Delete funnel"
-                        aria-label={`Delete ${funnel.name}`}
+                        onClick={() => deleteFunnel.mutate(funnel.id)}
+                        disabled={deleteFunnel.isPending}
+                        className="rounded-full bg-[#e07a5f] px-3 py-1 text-[12px] font-semibold text-white hover:bg-[#c9694f] transition-colors cursor-pointer disabled:opacity-60"
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        Delete
                       </button>
                     </div>
                   </div>
+                ) : (
+                  <ol className="mt-2.5 flex flex-wrap items-center gap-x-1 gap-y-1.5">
+                    {funnel.steps.map((step, i) => (
+                      <li key={i} className="flex min-w-0 max-w-full items-center gap-1">
+                        {i > 0 && (
+                          <span aria-hidden className="text-[11px] text-[#B5B0AA]">
+                            →
+                          </span>
+                        )}
+                        <span
+                          className="flex min-w-0 items-center gap-1.5 rounded-lg bg-white py-[3px] pl-1 pr-2 shadow-[0_0_0_1px_#E6E4DE]"
+                          title={stepLabel(step)}
+                        >
+                          <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#F2F1ED] font-mono text-[9.5px] font-semibold text-[#6E6C7C]">
+                            {i + 1}
+                          </span>
+                          <span className="truncate text-[11.5px] text-[#3D3B4F]">
+                            {stepLabel(step)}
+                          </span>
+                          <TypeChip
+                            type={step.type}
+                            className="h-4 shrink-0 px-[5px] text-[9.5px]"
+                          />
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
                 )}
               </li>
             );

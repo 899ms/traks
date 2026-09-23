@@ -1041,9 +1041,24 @@ function SiteAnalyticsPage(): ReactElement {
     goal: GoalDef | null;
     draft?: Omit<GoalDef, 'id'>;
   } | null>(null);
-  // Same pair for funnels: drawer list, add/edit form (opens over the drawer).
-  const [funnelForm, setFunnelForm] = useState<{ funnel: FunnelDef | null } | null>(null);
+  // Same pair for funnels: drawer list, add/edit form (optionally prefilled
+  // from `draft`, e.g. a duplicate). The drawer closes before the form opens.
+  const [funnelForm, setFunnelForm] = useState<{
+    funnel: FunnelDef | null;
+    draft?: Omit<FunnelDef, 'id'>;
+  } | null>(null);
   const [funnelsOpen, setFunnelsOpen] = useState(false);
+  // Duplicate = the add form prefilled with a copy. Names cap at 100 chars;
+  // keep the suffix inside it.
+  const copyName = (name: string): string => `${name.slice(0, 95)} copy`;
+  const duplicateGoal = ({ id: _id, ...rest }: GoalDef): void => {
+    setGoalsOpen(false);
+    setGoalForm({ goal: null, draft: { ...rest, name: copyName(rest.name) } });
+  };
+  const duplicateFunnel = ({ id: _id, ...rest }: FunnelDef): void => {
+    setFunnelsOpen(false);
+    setFunnelForm({ funnel: null, draft: { ...rest, name: copyName(rest.name) } });
+  };
   const [selectedFunnelId, setSelectedFunnelId] = useState<string | null>(null);
   const [chartMetric, setChartMetric] = useState<ChartMetric>('visitors');
 
@@ -1848,20 +1863,13 @@ function SiteAnalyticsPage(): ReactElement {
                 isError={goalStatsQ.isError}
                 onAdd={canManage ? () => setGoalForm({ goal: null }) : undefined}
                 onEdit={canManage ? goal => setGoalForm({ goal }) : undefined}
-                onDuplicate={
-                  canManage
-                    ? ({ id: _id, ...rest }) =>
-                        setGoalForm({
-                          goal: null,
-                          draft: { ...rest, name: `${rest.name.slice(0, 95)} copy` },
-                        })
-                    : undefined
-                }
+                onDuplicate={canManage ? duplicateGoal : undefined}
                 onManage={canManage ? () => setGoalsOpen(true) : undefined}
               />
 
               {/* Funnels */}
               <FunnelsPanel
+                siteId={siteId}
                 funnels={funnelsQ.isLoading ? undefined : funnelList}
                 selectedId={activeFunnelId}
                 onSelect={setSelectedFunnelId}
@@ -1869,6 +1877,8 @@ function SiteAnalyticsPage(): ReactElement {
                 isLoading={funnelStatsQ.isLoading}
                 isError={funnelStatsQ.isError || funnelsQ.isError}
                 onAdd={canManage ? () => setFunnelForm({ funnel: null }) : undefined}
+                onEdit={canManage ? funnel => setFunnelForm({ funnel }) : undefined}
+                onDuplicate={canManage ? duplicateFunnel : undefined}
                 onManage={canManage ? () => setFunnelsOpen(true) : undefined}
               />
             </>
@@ -1892,8 +1902,15 @@ function SiteAnalyticsPage(): ReactElement {
         siteLabel={site?.domain}
         stats={(goalStatsQ.data as any)?.data}
         periodLabel={PERIOD_LABELS[period] ?? period}
-        onAdd={() => setGoalForm({ goal: null })}
-        onEdit={goal => setGoalForm({ goal })}
+        onAdd={() => {
+          setGoalsOpen(false);
+          setGoalForm({ goal: null });
+        }}
+        onEdit={goal => {
+          setGoalsOpen(false);
+          setGoalForm({ goal });
+        }}
+        onDuplicate={duplicateGoal}
       />
 
       <GoalFormModal
@@ -1913,8 +1930,19 @@ function SiteAnalyticsPage(): ReactElement {
         siteId={siteId}
         siteLabel={site?.domain}
         selectedId={activeFunnelId}
-        onAdd={() => setFunnelForm({ funnel: null })}
-        onEdit={funnel => setFunnelForm({ funnel })}
+        onAdd={() => {
+          setFunnelsOpen(false);
+          setFunnelForm({ funnel: null });
+        }}
+        onEdit={funnel => {
+          setFunnelsOpen(false);
+          setFunnelForm({ funnel });
+        }}
+        onSelect={id => {
+          setSelectedFunnelId(id);
+          setFunnelsOpen(false);
+        }}
+        onDuplicate={duplicateFunnel}
       />
 
       <FunnelFormModal
@@ -1925,6 +1953,7 @@ function SiteAnalyticsPage(): ReactElement {
         siteId={siteId}
         domain={site?.domain}
         funnel={funnelForm?.funnel ?? null}
+        draft={funnelForm?.draft}
       />
 
       <DeleteSiteModal

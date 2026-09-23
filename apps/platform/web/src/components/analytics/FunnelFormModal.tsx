@@ -1,6 +1,6 @@
-import { useEffect, useState, type ReactElement, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check, Plus, X } from 'lucide-react';
+import { Check, GripVertical, Plus, X } from 'lucide-react';
 import type { FunnelDef, FunnelStep } from '@traks/shared';
 import { requiredTextError, targetError, propPairError } from '@traks/shared';
 import { cn } from '@/lib/utils';
@@ -26,6 +26,13 @@ const EMPTY_STEPS: FunnelStep[] = [
 
 type StepType = FunnelStep['type'];
 
+/** Per-step "has the user left this yet": target and prop pair separately,
+ *  so a half-typed pair doesn't flag while the target is fine and vice versa. */
+interface StepTouched {
+  target?: boolean;
+  prop?: boolean;
+}
+
 function Label({ children, extra }: { children: ReactNode; extra?: ReactNode }): ReactElement {
   return (
     <div className="mb-1.5 flex items-baseline justify-between text-[12px] font-semibold text-[#6E6C7C]">
@@ -35,9 +42,8 @@ function Label({ children, extra }: { children: ReactNode; extra?: ReactNode }):
   );
 }
 
-/** Compact inline radio pair for a step's type - same radio idiom as goals,
- *  shrunk so eight of them don't dominate the form. */
-function StepTypeRadios({
+/** Compact Page / Event segmented control for a step's type. */
+function StepTypeToggle({
   index,
   value,
   onChange,
@@ -50,37 +56,30 @@ function StepTypeRadios({
     <div
       role="radiogroup"
       aria-label={`Step ${index + 1} type`}
-      className="flex items-center gap-3.5"
+      className="grid shrink-0 grid-cols-2 gap-[2px] rounded-[10px] bg-[#F2F1ED] p-[2px]"
     >
       {(['page', 'event'] as const).map(t => {
         const on = value === t;
         return (
-          <label key={t} className="flex cursor-pointer items-center gap-1.5">
+          <label
+            key={t}
+            className={cn(
+              'cursor-pointer rounded-[8px] px-2 py-1 text-center text-[11.5px] font-semibold transition-colors',
+              'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-[#3D3B4F]/30',
+              on
+                ? 'bg-white text-[#3D3B4F] shadow-[0_0_0_1px_#E6E4DE]'
+                : 'text-[#6E6C7C] hover:text-[#3D3B4F]'
+            )}
+          >
             <input
               type="radio"
               name={`funnel-step-${index}-type`}
               value={t}
               checked={on}
               onChange={() => onChange(t)}
-              className="peer sr-only"
+              className="sr-only"
             />
-            <span
-              aria-hidden
-              className={cn(
-                'flex h-[14px] w-[14px] items-center justify-center rounded-full border-[1.5px] transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-[#3D3B4F]/30',
-                on ? 'border-[#3D3B4F]' : 'border-[#B5B0AA]'
-              )}
-            >
-              {on && <span className="h-[7px] w-[7px] rounded-full bg-[#3D3B4F]" />}
-            </span>
-            <span
-              className={cn(
-                'text-[12px] transition-colors',
-                on ? 'font-semibold text-[#3D3B4F]' : 'font-medium text-[#9B9590]'
-              )}
-            >
-              {t === 'page' ? 'Page visit' : 'Custom event'}
-            </span>
+            {t === 'page' ? 'Page' : 'Event'}
           </label>
         );
       })}
@@ -116,13 +115,25 @@ function funnelPreview(steps: FunnelStep[]): ReactNode | null {
   );
 }
 
-/** Add or edit a single funnel - name + ordered steps. `funnel` null = add. */
+/** Move one entry of an array from index `from` to index `to`. */
+function moved<T>(arr: T[], from: number, to: number): T[] {
+  const next = [...arr];
+  const [item] = next.splice(from, 1);
+  next.splice(to, 0, item);
+  return next;
+}
+
+/**
+ * Add or edit a single funnel - name + ordered steps. `funnel` null = add,
+ * optionally prefilled from `draft` (e.g. a duplicate).
+ */
 export function FunnelFormModal({
   open,
   onOpenChange,
   siteId,
   domain,
   funnel,
+  draft,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -130,35 +141,56 @@ export function FunnelFormModal({
   /** Site domain, shown as the fixed prefix of page-step paths. */
   domain?: string;
   funnel: FunnelDef | null;
+  /** Starting values for a new funnel, e.g. a duplicate of an existing one. */
+  draft?: Omit<FunnelDef, 'id'> | null;
 }): ReactElement {
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [steps, setSteps] = useState<FunnelStep[]>(EMPTY_STEPS);
+  // Stable per-step React keys, so reordering moves rows (and focus) with
+  // their step instead of re-labelling rows in place.
+  const [keys, setKeys] = useState<number[]>([]);
+  const nextKey = useRef(0);
   // Which event steps have their optional property filter expanded.
   const [filterOpen, setFilterOpen] = useState<boolean[]>([]);
   const [error, setError] = useState('');
   const [nameTouched, setNameTouched] = useState(false);
-  const [touchedSteps, setTouchedSteps] = useState<boolean[]>([]);
+  const [touched, setTouched] = useState<StepTouched[]>([]);
+  // Row being dragged (armed from its grip), for pointer reordering.
+  const [dragFrom, setDragFrom] = useState<number | null>(null);
+  const [armed, setArmed] = useState<number | null>(null);
   const editing = funnel !== null;
+
+  const newKeys = (n: number): number[] =>
+    Array.from({ length: n }, () => {
+      nextKey.current += 1;
+      return nextKey.current;
+    });
 
   useEffect(() => {
     if (open) {
-      const initial = funnel
-        ? funnel.steps.map(s => ({
+      const source = funnel ?? draft;
+      const initial = source
+        ? source.steps.map(s => ({
             type: s.type,
             target: s.target,
             propKey: s.propKey ?? '',
             propValue: s.propValue ?? '',
           }))
         : EMPTY_STEPS;
-      setName(funnel?.name ?? '');
+      setName(source?.name ?? '');
       setSteps(initial);
+      setKeys(newKeys(initial.length));
       setFilterOpen(initial.map(s => Boolean(s.propKey || s.propValue)));
       setError('');
       setNameTouched(false);
-      setTouchedSteps([]);
+      setTouched([]);
+      setDragFrom(null);
+      setArmed(null);
     }
-  }, [open, funnel]);
+    // newKeys only bumps a ref; it is deliberately not a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, funnel, draft]);
 
   const saveFunnel = useMutation({
     mutationFn: async () => {
@@ -186,14 +218,16 @@ export function FunnelFormModal({
   // Each step carries the same page-vs-event target rule as a goal; a wrong
   // one makes the whole funnel read zero at that step forever.
   const nameError = requiredTextError(name, 100, 'Funnel name');
-  const stepErrors = steps.map(
-    s => targetError(s.type, s.target) ?? propPairError(s.type, s.propKey ?? '', s.propValue ?? '')
-  );
+  const targetErrors = steps.map(s => targetError(s.type, s.target));
+  const propErrors = steps.map(s => propPairError(s.type, s.propKey ?? '', s.propValue ?? ''));
+  const stepErrors = steps.map((_, i) => targetErrors[i] ?? propErrors[i]);
   const canSave = !nameError && steps.length >= 2 && stepErrors.every(e => !e);
   const preview = stepErrors.every(e => !e) ? funnelPreview(steps) : null;
+  const shownError = (i: number): string | null =>
+    (touched[i]?.target ? targetErrors[i] : null) ?? (touched[i]?.prop ? propErrors[i] : null);
 
   const submit = (): void => {
-    setTouchedSteps(steps.map(() => true));
+    setTouched(steps.map(() => ({ target: true, prop: true })));
     setNameTouched(true);
     if (canSave) saveFunnel.mutate();
   };
@@ -205,21 +239,48 @@ export function FunnelFormModal({
     setSteps(prev => prev.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
     setError('');
   };
-  const touchStep = (i: number): void => {
-    setTouchedSteps(prev => {
+  const touchStep = (i: number, field: keyof StepTouched): void => {
+    setTouched(prev => {
       const next = [...prev];
-      next[i] = true;
+      next[i] = { ...next[i], [field]: true };
       return next;
     });
   };
+  // Leaving an empty target isn't an error yet (submit flags it) - tabbing
+  // through a fresh step shouldn't paint it red.
+  const touchTarget = (i: number, value: string): void => {
+    if (value.trim()) touchStep(i, 'target');
+  };
   const removeStep = (i: number): void => {
     setSteps(prev => prev.filter((_, idx) => idx !== i));
+    setKeys(prev => prev.filter((_, idx) => idx !== i));
     setFilterOpen(prev => prev.filter((_, idx) => idx !== i));
-    setTouchedSteps(prev => prev.filter((_, idx) => idx !== i));
+    setTouched(prev => prev.filter((_, idx) => idx !== i));
   };
   const addStep = (): void => {
     setSteps(prev => [...prev, { type: 'page', target: '' }]);
+    setKeys(prev => [...prev, ...newKeys(1)]);
     setFilterOpen(prev => [...prev, false]);
+  };
+  const moveStep = (from: number, to: number): void => {
+    if (to < 0 || to >= steps.length || from === to) return;
+    setSteps(prev => moved(prev, from, to));
+    setKeys(prev => moved(prev, from, to));
+    // Pad before moving: these arrays only grow as steps are touched/opened.
+    setFilterOpen(prev =>
+      moved(
+        steps.map((_, i) => prev[i] ?? false),
+        from,
+        to
+      )
+    );
+    setTouched(prev =>
+      moved(
+        steps.map((_, i) => prev[i] ?? {}),
+        from,
+        to
+      )
+    );
   };
   const setFilter = (i: number, on: boolean): void => {
     setFilterOpen(prev => {
@@ -229,6 +290,10 @@ export function FunnelFormModal({
     });
     if (!on) setStep(i, { propKey: '', propValue: '' });
   };
+
+  const readbackHint = steps.some(s => !s.target.trim())
+    ? 'Fill in every step to see what counts.'
+    : 'Fix the steps above to see what counts.';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -253,7 +318,9 @@ export function FunnelFormModal({
                   setName(e.target.value);
                   setError('');
                 }}
-                onBlur={() => setNameTouched(true)}
+                onBlur={e => {
+                  if (e.currentTarget.value.trim()) setNameTouched(true);
+                }}
                 onKeyDown={onEnter}
                 className="h-10 px-4 text-[13px]"
                 autoFocus
@@ -263,30 +330,125 @@ export function FunnelFormModal({
 
             <div>
               <Label extra={`${steps.length} of ${MAX_STEPS}`}>Steps, in order</Label>
-              <ol className="space-y-2">
+              <ol className="space-y-1.5">
                 {steps.map((step, i) => {
-                  const showErr = !!touchedSteps[i] && !!stepErrors[i];
+                  const err = shownError(i);
                   const hasFilter = step.type === 'event' && filterOpen[i];
                   return (
-                    <li key={i} className="rounded-[14px] border border-[#E6E4DE] px-3.5 py-3">
-                      <div className="mb-2 flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2.5">
-                          <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-[#F2F1ED] font-mono text-[10.5px] font-semibold text-[#6E6C7C]">
-                            {i + 1}
-                          </span>
-                          <StepTypeRadios
-                            index={i}
-                            value={step.type}
-                            onChange={t => {
-                              setStep(i, { type: t, propKey: '', propValue: '' });
-                              setFilter(i, false);
-                            }}
-                          />
-                        </div>
+                    <li
+                      key={keys[i] ?? `i${i}`}
+                      draggable={armed === i}
+                      onDragStart={e => {
+                        setDragFrom(i);
+                        e.dataTransfer.effectAllowed = 'move';
+                        // Firefox only starts a drag that carries data.
+                        e.dataTransfer.setData('text/plain', String(i + 1));
+                      }}
+                      onDragOver={e => {
+                        if (dragFrom === null) return;
+                        e.preventDefault();
+                        if (dragFrom === i) return;
+                        // Swap once the pointer crosses the row's midpoint,
+                        // so rows of different heights don't flip back.
+                        const r = e.currentTarget.getBoundingClientRect();
+                        const past =
+                          dragFrom < i
+                            ? e.clientY > r.top + r.height / 2
+                            : e.clientY < r.top + r.height / 2;
+                        if (past) {
+                          moveStep(dragFrom, i);
+                          setDragFrom(i);
+                        }
+                      }}
+                      onDrop={e => e.preventDefault()}
+                      onDragEnd={() => {
+                        setDragFrom(null);
+                        setArmed(null);
+                      }}
+                      className={cn(
+                        'rounded-xl transition-opacity',
+                        dragFrom === i && 'opacity-50'
+                      )}
+                    >
+                      <div className="flex items-center gap-1.5">
                         <button
+                          type="button"
+                          onPointerDown={() => setArmed(i)}
+                          onPointerUp={() => setArmed(null)}
+                          onKeyDown={e => {
+                            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                              e.preventDefault();
+                              moveStep(i, e.key === 'ArrowUp' ? i - 1 : i + 1);
+                            }
+                          }}
+                          className="flex h-7 w-5 shrink-0 cursor-grab items-center justify-center rounded-md text-[#B5B0AA] hover:bg-[#F2F1ED] hover:text-[#6E6C7C] active:cursor-grabbing transition-colors"
+                          title="Drag, or use the arrow keys, to reorder"
+                          aria-label={`Reorder step ${i + 1} (arrow keys move it)`}
+                        >
+                          <GripVertical className="h-3.5 w-3.5" />
+                        </button>
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#F2F1ED] font-mono text-[10px] font-semibold text-[#6E6C7C]">
+                          {i + 1}
+                        </span>
+                        <StepTypeToggle
+                          index={i}
+                          value={step.type}
+                          onChange={t => {
+                            setStep(i, { type: t, propKey: '', propValue: '' });
+                            setFilter(i, false);
+                            // The target means something else now; don't
+                            // flash the old type's error at it.
+                            setTouched(prev => {
+                              const next = [...prev];
+                              next[i] = {};
+                              return next;
+                            });
+                          }}
+                        />
+                        {step.type === 'page' ? (
+                          <div
+                            className={cn(
+                              'flex h-9 min-w-0 flex-1 items-center overflow-hidden rounded-xl bg-[#F2F1ED] transition-shadow focus-within:bg-white focus-within:shadow-[inset_0_0_0_1.5px_var(--ring)]',
+                              touched[i]?.target &&
+                                targetErrors[i] &&
+                                'shadow-[inset_0_0_0_1.5px_var(--destructive)]'
+                            )}
+                          >
+                            {domain && (
+                              <span className="flex h-full max-w-[40%] shrink-0 items-center truncate border-r border-[#E6E4DE] pl-3 pr-2 font-mono text-[11px] text-[#9B9590]">
+                                {domain}
+                              </span>
+                            )}
+                            <input
+                              placeholder="/pricing or /docs/*"
+                              value={step.target}
+                              maxLength={2048}
+                              aria-label={`Step ${i + 1} path`}
+                              aria-invalid={!!touched[i]?.target && !!targetErrors[i]}
+                              onChange={e => setStep(i, { target: e.target.value })}
+                              onBlur={e => touchTarget(i, e.currentTarget.value)}
+                              onKeyDown={onEnter}
+                              className="h-full min-w-0 flex-1 bg-transparent px-2.5 text-[13px] text-[#3D3B4F] outline-none placeholder:text-[#B5B0AA]"
+                            />
+                          </div>
+                        ) : (
+                          <Input
+                            placeholder="e.g. signup"
+                            value={step.target}
+                            maxLength={2048}
+                            aria-label={`Step ${i + 1} event name`}
+                            aria-invalid={!!touched[i]?.target && !!targetErrors[i]}
+                            onChange={e => setStep(i, { target: e.target.value })}
+                            onBlur={e => touchTarget(i, e.currentTarget.value)}
+                            onKeyDown={onEnter}
+                            className="h-9 min-w-0 flex-1 rounded-xl px-3 text-[13px]"
+                          />
+                        )}
+                        <button
+                          type="button"
                           onClick={() => removeStep(i)}
                           disabled={steps.length <= 2}
-                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[#B5B0AA] hover:bg-[#e07a5f]/10 hover:text-[#e07a5f] disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-[#B5B0AA] disabled:cursor-default transition-colors cursor-pointer"
+                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[#B5B0AA] hover:bg-[#e07a5f]/10 hover:text-[#e07a5f] disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-[#B5B0AA] disabled:cursor-default transition-colors cursor-pointer"
                           title={
                             steps.length <= 2 ? 'A funnel needs at least two steps' : 'Remove step'
                           }
@@ -296,60 +458,44 @@ export function FunnelFormModal({
                         </button>
                       </div>
 
-                      {step.type === 'page' ? (
-                        <div
-                          className={cn(
-                            'flex h-9 items-center overflow-hidden rounded-xl bg-[#F2F1ED] transition-shadow focus-within:bg-white focus-within:shadow-[inset_0_0_0_1.5px_var(--ring)]',
-                            showErr && 'shadow-[inset_0_0_0_1.5px_var(--destructive)]'
-                          )}
-                        >
-                          {domain && (
-                            <span className="flex h-full max-w-[42%] shrink-0 items-center truncate border-r border-[#E6E4DE] pl-3 pr-2.5 font-mono text-[11.5px] text-[#9B9590]">
-                              {domain}
-                            </span>
-                          )}
-                          <input
-                            placeholder="/pricing or /docs/*"
-                            value={step.target}
-                            maxLength={2048}
-                            aria-invalid={showErr}
-                            onChange={e => setStep(i, { target: e.target.value })}
-                            onBlur={() => touchStep(i)}
-                            onKeyDown={onEnter}
-                            className="h-full min-w-0 flex-1 bg-transparent px-3 text-[13px] text-[#3D3B4F] outline-none placeholder:text-[#B5B0AA]"
-                          />
-                        </div>
-                      ) : (
-                        <>
-                          <Input
-                            placeholder="Event name, e.g. signup"
-                            value={step.target}
-                            maxLength={2048}
-                            aria-invalid={showErr}
-                            onChange={e => setStep(i, { target: e.target.value })}
-                            onBlur={() => touchStep(i)}
-                            onKeyDown={onEnter}
-                            className="h-9 rounded-xl px-3 text-[13px]"
-                          />
+                      {step.type === 'event' && (
+                        <div className="pl-[52px] pr-9">
                           {hasFilter ? (
-                            <div className="mt-2">
+                            <div className="mt-1.5">
                               <div className="mb-1 flex items-baseline justify-between text-[11.5px] font-semibold text-[#6E6C7C]">
                                 <span>Only when a property matches</span>
                                 <button
-                                  onClick={() => setFilter(i, false)}
+                                  type="button"
+                                  onClick={() => {
+                                    setFilter(i, false);
+                                    setTouched(prev => {
+                                      const next = [...prev];
+                                      next[i] = { ...next[i], prop: false };
+                                      return next;
+                                    });
+                                  }}
                                   className="font-medium text-[#9B9590] hover:text-[#3D3B4F] transition-colors cursor-pointer"
                                 >
                                   Remove
                                 </button>
                               </div>
-                              <div className="flex items-center gap-2">
+                              {/* Validated once focus leaves the pair: tabbing
+                                from key to value must not flag the value. */}
+                              <div
+                                className="flex items-center gap-2"
+                                onBlur={e => {
+                                  if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                                    touchStep(i, 'prop');
+                                  }
+                                }}
+                              >
                                 <Input
                                   placeholder="e.g. plan"
                                   value={step.propKey ?? ''}
                                   maxLength={128}
-                                  aria-invalid={showErr}
+                                  aria-label={`Step ${i + 1} property`}
+                                  aria-invalid={!!touched[i]?.prop && !!propErrors[i]}
                                   onChange={e => setStep(i, { propKey: e.target.value })}
-                                  onBlur={() => touchStep(i)}
                                   onKeyDown={onEnter}
                                   className="h-8 rounded-xl px-3 text-[12px]"
                                 />
@@ -358,9 +504,9 @@ export function FunnelFormModal({
                                   placeholder="e.g. pro"
                                   value={step.propValue ?? ''}
                                   maxLength={512}
-                                  aria-invalid={showErr}
+                                  aria-label={`Step ${i + 1} property value`}
+                                  aria-invalid={!!touched[i]?.prop && !!propErrors[i]}
                                   onChange={e => setStep(i, { propValue: e.target.value })}
-                                  onBlur={() => touchStep(i)}
                                   onKeyDown={onEnter}
                                   className="h-8 rounded-xl px-3 text-[12px]"
                                 />
@@ -368,23 +514,29 @@ export function FunnelFormModal({
                             </div>
                           ) : (
                             <button
+                              type="button"
                               onClick={() => setFilter(i, true)}
-                              className="mt-1.5 text-[11.5px] font-semibold text-[#6E6C7C] hover:text-[#3D3B4F] transition-colors cursor-pointer"
+                              className="mt-1 text-[11.5px] font-semibold text-[#6E6C7C] hover:text-[#3D3B4F] transition-colors cursor-pointer"
                             >
                               + Only when a property matches
                             </button>
                           )}
-                        </>
+                        </div>
                       )}
-                      {showErr && <FieldError message={stepErrors[i]} />}
+                      {err && (
+                        <div className="pl-[52px]">
+                          <FieldError message={err} />
+                        </div>
+                      )}
                     </li>
                   );
                 })}
               </ol>
               {steps.length < MAX_STEPS && (
                 <button
+                  type="button"
                   onClick={addStep}
-                  className="mt-2 flex items-center gap-1.5 rounded-full bg-[#F2F1ED] px-3 py-1.5 text-[12px] font-semibold text-[#3D3B4F] hover:bg-[#E6E4DE] transition-colors cursor-pointer"
+                  className="mt-2.5 flex items-center gap-1.5 rounded-full bg-[#F2F1ED] px-3 py-1.5 text-[12px] font-semibold text-[#3D3B4F] hover:bg-[#E6E4DE] transition-colors cursor-pointer"
                 >
                   <Plus className="h-3.5 w-3.5" />
                   Add step
@@ -392,12 +544,17 @@ export function FunnelFormModal({
               )}
             </div>
 
-            {preview && (
-              <div className="flex items-start gap-2.5 rounded-[14px] bg-[#F9F8F6] px-3.5 py-2.5 text-[12.5px] leading-relaxed text-[#6E6C7C]">
-                <span className="mt-[7px] h-2 w-2 shrink-0 rounded-full bg-[#28E99F]" />
-                <span>{preview}</span>
-              </div>
-            )}
+            {/* Always holds its row: the dialog is centered, so the line
+              appearing or vanishing would shift the steps under the cursor. */}
+            <div className="flex items-start gap-2.5 rounded-[14px] bg-[#F9F8F6] px-3.5 py-2.5 text-[12.5px] leading-relaxed text-[#6E6C7C]">
+              <span
+                className={cn(
+                  'mt-[7px] h-2 w-2 shrink-0 rounded-full',
+                  preview ? 'bg-[#28E99F]' : 'bg-[#E6E4DE]'
+                )}
+              />
+              <span className={cn(!preview && 'text-[#B5B0AA]')}>{preview ?? readbackHint}</span>
+            </div>
             {error && <p className="text-[13px] text-[#e07a5f]">{error}</p>}
           </div>
         </DialogBody>

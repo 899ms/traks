@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { Copy, MoreHorizontal, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import type { GoalStat } from '@traks/shared';
 import { cn, formatNumber } from '@/lib/utils';
 import { api } from '@/lib/api';
@@ -12,16 +12,27 @@ import {
   DrawerBody,
   DrawerFooter,
 } from '@/components/ui/drawer';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import type { GoalDef } from './GoalFormModal';
 import { TypeChip } from './TypeChip';
 
 /** Search only earns its space once the list is long enough to lose things in. */
 const SEARCH_THRESHOLD = 8;
 
+const MENU_ITEM =
+  'rounded-[10px] text-[12.5px] text-[#3D3B4F] hover:bg-[#F2F1ED] focus:bg-[#F2F1ED]';
+
 /**
- * Right-side drawer listing every goal on the site. Adding and editing open
- * the GoalFormModal on top of the drawer (the drawer stays mounted); delete
- * is inline with a second-click confirm.
+ * Right-side drawer listing every goal on the site as cards: rule, and the
+ * dashboard period's conversions. Adding, editing and duplicating hand off to
+ * the GoalFormModal (the dashboard closes the drawer first); delete is
+ * confirmed inside the card.
  */
 export function GoalsDrawer({
   open,
@@ -32,6 +43,7 @@ export function GoalsDrawer({
   periodLabel,
   onAdd,
   onEdit,
+  onDuplicate,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -44,6 +56,7 @@ export function GoalsDrawer({
   periodLabel: string;
   onAdd: () => void;
   onEdit: (goal: GoalDef) => void;
+  onDuplicate?: (goal: GoalDef) => void;
 }): ReactElement {
   const queryClient = useQueryClient();
   const [error, setError] = useState('');
@@ -78,7 +91,7 @@ export function GoalsDrawer({
   });
 
   const goals = ((goalsQ.data as any)?.data ?? []) as GoalDef[];
-  const uniquesById = useMemo(() => new Map((stats ?? []).map(s => [s.id, s.uniques])), [stats]);
+  const statsById = useMemo(() => new Map((stats ?? []).map(s => [s.id, s])), [stats]);
   const showSearch = goals.length > SEARCH_THRESHOLD;
   const q = query.trim().toLowerCase();
   const visible = q
@@ -92,7 +105,7 @@ export function GoalsDrawer({
     : goals;
 
   return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
+    <Drawer open={open} onOpenChange={onOpenChange} className="max-w-[460px]">
       <DrawerHeader onClose={() => onOpenChange(false)}>
         <div className="flex items-start justify-between gap-3 pr-2">
           <div className="min-w-0">
@@ -155,85 +168,113 @@ export function GoalsDrawer({
           </p>
         )}
 
-        <ul className="-mx-1.5">
+        <ul className="space-y-2">
           {visible.map(goal => {
-            const uniques = uniquesById.get(goal.id);
+            const stat = statsById.get(goal.id);
             const confirming = confirmId === goal.id;
+            const rule =
+              goal.propKey && goal.propValue
+                ? `${goal.target} · ${goal.propKey}=${goal.propValue}`
+                : goal.target;
             return (
               <li
                 key={goal.id}
                 className={cn(
-                  'group flex items-center justify-between gap-3 rounded-xl px-1.5 py-2.5 transition-colors',
-                  'border-b border-[#E6E4DE] last:border-b-0 hover:border-transparent hover:bg-[#F9F8F6]',
-                  confirming && 'border-transparent bg-[#fdf1ed]'
+                  'rounded-[14px] p-3.5 transition-colors',
+                  confirming ? 'bg-[#fdf1ed]' : 'bg-[#F9F8F6] hover:bg-[#F2F1ED]'
                 )}
-                onMouseLeave={() => {
-                  if (confirming && !deleteGoal.isPending) setConfirmId(null);
-                }}
               >
-                <button
-                  onClick={() => onEdit(goal)}
-                  className="min-w-0 flex-1 cursor-pointer text-left"
-                  title="Edit goal"
-                >
-                  <p className="truncate text-[13px] font-medium text-[#3D3B4F]">{goal.name}</p>
-                  {confirming ? (
-                    <p className="mt-0.5 text-[11.5px] text-[#e07a5f]">
+                <div className="flex items-start justify-between gap-2">
+                  <button
+                    onClick={() => onEdit(goal)}
+                    className="min-w-0 flex-1 cursor-pointer text-left"
+                    title="Edit goal"
+                  >
+                    <span className="block truncate text-[13.5px] font-semibold text-[#3D3B4F]">
+                      {goal.name}
+                    </span>
+                    <span className="mt-1 flex min-w-0 items-center gap-1.5">
+                      <TypeChip type={goal.type} />
+                      <span className="truncate text-[11.5px] text-[#9B9590]" title={rule}>
+                        {rule}
+                      </span>
+                    </span>
+                  </button>
+                  {!confirming && (
+                    <div className="flex shrink-0 items-start gap-1">
+                      {/* The period's numbers; "-" until the stats arrive or
+                        for a goal the stats don't cover yet. */}
+                      <div className="text-right">
+                        <p
+                          className={cn(
+                            'text-[15px] font-bold leading-tight tabular-nums',
+                            stat ? 'text-[#3D3B4F]' : 'text-[#B5B0AA]'
+                          )}
+                        >
+                          {stat ? `${stat.conversionRate}%` : '-'}
+                        </p>
+                        {stat && (
+                          <p className="text-[11px] tabular-nums text-[#9B9590]">
+                            {formatNumber(stat.uniques)} uniques
+                          </p>
+                        )}
+                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          aria-label={`${goal.name} options`}
+                          className="-mr-1 -mt-0.5 flex h-7 w-7 items-center justify-center rounded-full text-[#9B9590] hover:bg-[#E6E4DE] hover:text-[#3D3B4F] transition-colors cursor-pointer"
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent className="w-44 border-0 p-1.5 shadow-float-lg">
+                          <DropdownMenuItem onClick={() => onEdit(goal)} className={MENU_ITEM}>
+                            <Pencil className="h-3.5 w-3.5 text-[#6E6C7C]" />
+                            Edit
+                          </DropdownMenuItem>
+                          {onDuplicate && (
+                            <DropdownMenuItem
+                              onClick={() => onDuplicate(goal)}
+                              className={MENU_ITEM}
+                            >
+                              <Copy className="h-3.5 w-3.5 text-[#6E6C7C]" />
+                              Duplicate
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuSeparator className="bg-[#ECEBE6]" />
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setError('');
+                              setConfirmId(goal.id);
+                            }}
+                            className="rounded-[10px] text-[12.5px] text-[#e07a5f] hover:bg-[#fdf1ed] focus:bg-[#fdf1ed]"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Delete…
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  )}
+                </div>
+
+                {confirming && (
+                  <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-[12px] text-[#e07a5f]">
                       Delete this goal? Past reports keep its history.
                     </p>
-                  ) : (
-                    <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11.5px] text-[#9B9590]">
-                      <TypeChip type={goal.type} />
-                      <span className="truncate">
-                        {goal.target}
-                        {goal.propKey && goal.propValue && ` · ${goal.propKey} = ${goal.propValue}`}
-                      </span>
-                    </p>
-                  )}
-                </button>
-
-                {confirming ? (
-                  <div className="flex shrink-0 items-center gap-1">
-                    <button
-                      onClick={() => setConfirmId(null)}
-                      className="rounded-full px-2.5 py-1 text-[12px] font-semibold text-[#6E6C7C] hover:bg-white transition-colors cursor-pointer"
-                    >
-                      Keep
-                    </button>
-                    <button
-                      onClick={() => deleteGoal.mutate(goal.id)}
-                      disabled={deleteGoal.isPending}
-                      className="rounded-full bg-[#e07a5f] px-2.5 py-1 text-[12px] font-semibold text-white hover:bg-[#c9694f] transition-colors cursor-pointer disabled:opacity-60"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                ) : (
-                  <div className="relative flex shrink-0 items-center">
-                    <span
-                      className={cn(
-                        'text-[12.5px] tabular-nums text-[#6E6C7C] transition-opacity group-hover:opacity-0 group-focus-within:opacity-0',
-                        uniques === undefined && 'text-[#B5B0AA]'
-                      )}
-                    >
-                      {uniques === undefined ? '-' : formatNumber(uniques)}
-                    </span>
-                    <div className="absolute right-0 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                    <div className="flex shrink-0 items-center gap-1">
                       <button
-                        onClick={() => onEdit(goal)}
-                        className="flex h-7 w-7 items-center justify-center rounded-lg text-[#6E6C7C] hover:bg-[#E6E4DE] hover:text-[#3D3B4F] transition-colors cursor-pointer"
-                        title="Edit goal"
-                        aria-label={`Edit ${goal.name}`}
+                        onClick={() => setConfirmId(null)}
+                        className="rounded-full px-3 py-1 text-[12px] font-semibold text-[#6E6C7C] hover:bg-white transition-colors cursor-pointer"
                       >
-                        <Pencil className="h-3.5 w-3.5" />
+                        Keep
                       </button>
                       <button
-                        onClick={() => setConfirmId(goal.id)}
-                        className="flex h-7 w-7 items-center justify-center rounded-lg text-[#e07a5f] hover:bg-[#e07a5f]/10 transition-colors cursor-pointer"
-                        title="Delete goal"
-                        aria-label={`Delete ${goal.name}`}
+                        onClick={() => deleteGoal.mutate(goal.id)}
+                        disabled={deleteGoal.isPending}
+                        className="rounded-full bg-[#e07a5f] px-3 py-1 text-[12px] font-semibold text-white hover:bg-[#c9694f] transition-colors cursor-pointer disabled:opacity-60"
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        Delete
                       </button>
                     </div>
                   </div>

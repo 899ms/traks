@@ -74,14 +74,25 @@ export function GoalsPanel({
     <div className={cn('rounded-[20px] bg-white p-6 shadow-float', className)}>
       <div className="mb-4 flex items-center justify-between gap-3">
         <h3 className="text-[15px] font-bold tracking-[-0.01em] text-[#3D3B4F]">Goals</h3>
-        {onManage && hasGoals && (
-          <button
-            onClick={onManage}
-            className="rounded-full border border-[#E6E4DE] px-3.5 py-1.5 text-[12px] font-semibold text-[#6E6C7C] hover:bg-[#F2F1ED] hover:text-[#3D3B4F] transition-colors cursor-pointer"
-          >
-            All goals
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {onManage && hasGoals && (
+            <button
+              onClick={onManage}
+              className="rounded-full border border-[#E6E4DE] px-3.5 py-1.5 text-[12px] font-semibold text-[#6E6C7C] hover:bg-[#F2F1ED] hover:text-[#3D3B4F] transition-colors cursor-pointer"
+            >
+              All goals
+            </button>
+          )}
+          {onAdd && (
+            <button
+              onClick={onAdd}
+              className="flex items-center gap-1.5 rounded-full bg-[#3D3B4F] px-3.5 py-1.5 text-[12px] font-semibold text-white hover:bg-[#2C2B3B] transition-colors cursor-pointer"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add goal
+            </button>
+          )}
+        </div>
       </div>
 
       {isError ? (
