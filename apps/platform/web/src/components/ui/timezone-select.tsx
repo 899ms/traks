@@ -22,7 +22,7 @@ function allTimezones(current: string): string[] {
   return current && !supported.includes(current) ? [current, ...supported] : supported;
 }
 
-function offsetLabel(tz: string): string {
+export function offsetLabel(tz: string): string {
   try {
     const parts = new Intl.DateTimeFormat('en-US', {
       timeZone: tz,

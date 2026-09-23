@@ -1,7 +1,7 @@
-import { useEffect, useState, type ReactElement, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, LogOut, Trash2 } from 'lucide-react';
+import { Check, Clock, Globe, LogOut, Pencil, Trash2 } from 'lucide-react';
 import { requiredTextError } from '@traks/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,7 +14,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { FieldError } from '@/components/ui/field-error';
-import { TimezoneSelect } from '@/components/ui/timezone-select';
+import { TimezoneSelect, offsetLabel } from '@/components/ui/timezone-select';
+import { SiteFavicon } from '@/components/sites/SiteFavicon';
 import { api, ApiError } from '@/lib/api';
 import { useWorkspace } from '@/lib/workspace';
 
@@ -22,32 +23,52 @@ export const Route = createFileRoute('/portal/settings')({
   component: SettingsPage,
 });
 
-const CARD = 'rounded-[20px] bg-white shadow-float';
+const CARD = 'rounded-[20px] bg-white p-5 shadow-float sm:p-6';
 
-type SectionId = 'workspace' | 'timezone' | 'danger';
+/** Section icon tiles: one hue per section so the page reads at a glance. */
+const TONE = {
+  lavender: 'bg-[#eceff9] text-[#4c5b8f]',
+  mint: 'bg-[#dcf6ea] text-[#17875c]',
+  coral: 'bg-[#fbe9e3] text-[#c9694f]',
+} as const;
+
+/** Ink primary that reads as "nothing to do" when disabled, not faded mint. */
+const PRIMARY =
+  'shrink-0 bg-[#3D3B4F] px-5 text-[13px] font-semibold text-white shadow-none hover:bg-[#2C2B3B] disabled:bg-[#F2F1ED] disabled:text-[#B5B0AA] disabled:opacity-100';
+
+interface SiteRow {
+  id: string;
+  name: string;
+  domain: string;
+  timezone?: string | null;
+  favicon?: string | null;
+}
 
 /**
- * Settings for the CURRENT workspace (header switcher): one card of sections,
- * label column left, controls right. Three sections need no side navigation.
- * Other workspaces are managed by switching to them.
+ * Settings for the CURRENT workspace (header switcher): the page title with
+ * the workspace's role and counts, then one card per setting. No side navigation - three sections never
+ * needed one. Other workspaces are managed by switching to them.
  */
 function SettingsPage(): ReactElement {
   const { current, workspaces } = useWorkspace();
   const isOwner = current?.role === 'owner';
 
+  // One sites read serves the header count and the timezone card.
+  const sitesQ = useQuery({
+    queryKey: ['sites', current?.id],
+    queryFn: () => api.getSites(current!.id),
+    enabled: !!current,
+    staleTime: 60_000,
+  });
+  const sites = ((sitesQ.data as any)?.data ?? []) as SiteRow[];
+
   return (
     <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
-      <div className="mb-6">
-        <h1 className="text-[26px] font-bold text-[#3D3B4F] tracking-[-0.02em]">Settings</h1>
-        <p className="mt-1 text-[14px] text-[#9B9590]">
-          {current ? `For the ${current.name} workspace.` : 'Workspace preferences.'}
-        </p>
-      </div>
-
+      <PageHeader />
       {current && (
-        <div className={`${CARD} px-6 sm:px-7`}>
-          <WorkspaceSection />
-          {isOwner && <TimezoneSection />}
+        <div className="max-w-3xl space-y-4">
+          {isOwner && <WorkspaceSection />}
+          <TimezoneSection sites={sites} sitesLoaded={sitesQ.isSuccess} />
           <DangerSection isLastWorkspace={workspaces.length <= 1} />
         </div>
       )}
@@ -55,31 +76,41 @@ function SettingsPage(): ReactElement {
   );
 }
 
-function Section({
+/** Section card: tinted icon tile, heading and one-line explanation, then the control. */
+function SectionCard({
   id,
+  icon,
+  tone,
   title,
   sub,
-  last,
+  aside,
   children,
 }: {
-  id: SectionId;
+  id: string;
+  icon: ReactNode;
+  tone: keyof typeof TONE;
   title: string;
   sub: ReactNode;
-  last?: boolean;
-  children: ReactNode;
+  aside?: ReactNode;
+  children?: ReactNode;
 }): ReactElement {
   return (
-    <section
-      id={`settings-${id}`}
-      className={`grid scroll-mt-20 grid-cols-1 gap-4 py-6 md:grid-cols-[240px_minmax(0,1fr)] md:gap-8 ${
-        last ? '' : 'border-b border-[#F2F1ED]'
-      }`}
-    >
-      <div className="flex flex-col gap-1">
-        <h2 className="text-[14px] font-semibold text-[#3D3B4F]">{title}</h2>
-        <p className="text-[12px] leading-relaxed text-[#9B9590]">{sub}</p>
+    <section id={`settings-${id}`} className={`${CARD} scroll-mt-20`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <span
+            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[11px] ${TONE[tone]}`}
+          >
+            {icon}
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-[14.5px] font-semibold text-[#3D3B4F]">{title}</h2>
+            <p className="mt-0.5 text-[12.5px] leading-relaxed text-[#9B9590]">{sub}</p>
+          </div>
+        </div>
+        {aside}
       </div>
-      <div className="flex min-w-0 flex-col gap-2.5">{children}</div>
+      {children && <div className="mt-4 flex min-w-0 flex-col gap-2.5 sm:pl-12">{children}</div>}
     </section>
   );
 }
@@ -96,7 +127,40 @@ function RolePill({ role }: { role: 'owner' | 'member' }): ReactElement {
   );
 }
 
-/** Name and role. Owners rename; members see the name read-only. */
+/** Title like every other tab, plus the workspace's role, sites and members. */
+function PageHeader(): ReactElement {
+  const { current } = useWorkspace();
+  const isOwner = current?.role === 'owner';
+  // The roster is owner-only on the server; members just don't see a count.
+  const membersQ = useQuery({
+    queryKey: ['members', current?.id],
+    queryFn: () => api.getMembers(current!.id),
+    enabled: !!current && isOwner,
+    staleTime: 60_000,
+  });
+  const memberCount = ((membersQ.data as any)?.data as unknown[] | undefined)?.length;
+
+  return (
+    <div className="mb-6">
+      <h1 className="text-[26px] font-bold text-[#3D3B4F] tracking-[-0.02em]">Settings</h1>
+      {current ? (
+        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[14px] text-[#9B9590]">
+          <span>For the {current.name} workspace.</span>
+          <RolePill role={current.role} />
+          <span className="text-[13px]">
+            {current.siteCount} {current.siteCount === 1 ? 'site' : 'sites'}
+            {memberCount !== undefined &&
+              ` · ${memberCount} ${memberCount === 1 ? 'member' : 'members'}`}
+          </span>
+        </p>
+      ) : (
+        <p className="mt-1 text-[14px] text-[#9B9590]">Workspace preferences.</p>
+      )}
+    </div>
+  );
+}
+
+/** Owners only: rename. The page header shows the name to everyone. */
 function WorkspaceSection(): ReactElement | null {
   const queryClient = useQueryClient();
   const { current } = useWorkspace();
@@ -123,46 +187,42 @@ function WorkspaceSection(): ReactElement | null {
   });
 
   if (!current) return null;
-  const isOwner = current.role === 'owner';
   const wsNameError = requiredTextError(name, 100, 'Workspace name');
-  const nameChanged = !wsNameError && name.trim() !== current.name;
+  const dirty = name.trim() !== current.name;
+  const nameChanged = !wsNameError && dirty;
 
   return (
-    <Section
+    <SectionCard
       id="workspace"
-      title="Workspace"
-      sub="Name and role. Shown in the header switcher and on invites."
+      icon={<Pencil className="h-4 w-4" />}
+      tone="lavender"
+      title="Workspace name"
+      sub="Shown in the header switcher and on invitations."
     >
-      <div className="mb-0.5 flex items-center gap-2.5">
-        <RolePill role={current.role} />
-        <span className="text-[12px] text-[#9B9590]">
-          {current.siteCount} {current.siteCount === 1 ? 'site' : 'sites'}
-          {!isOwner && ' · you are a member'}
-        </span>
-      </div>
-      {isOwner ? (
-        <form
-          className="flex flex-col gap-2 sm:flex-row sm:items-start"
-          onSubmit={e => {
-            e.preventDefault();
-            if (nameChanged && !rename.isPending) rename.mutate();
-          }}
-        >
-          <div className="w-full sm:w-[360px]">
-            <Input
-              value={name}
-              maxLength={100}
-              aria-invalid={!!wsNameError}
-              onChange={e => setName(e.target.value)}
-              className="h-10 px-4 text-[14px]"
-            />
-            <FieldError message={wsNameError} />
-          </div>
+      <form
+        className="flex flex-col gap-2 sm:flex-row sm:items-start"
+        onSubmit={e => {
+          e.preventDefault();
+          if (nameChanged && !rename.isPending) rename.mutate();
+        }}
+      >
+        <div className="w-full sm:max-w-[360px] sm:flex-1">
+          <Input
+            value={name}
+            maxLength={100}
+            aria-label="Workspace name"
+            aria-invalid={!!wsNameError}
+            onChange={e => setName(e.target.value)}
+            className="h-10 px-4 text-[14px]"
+          />
+          <FieldError message={wsNameError} />
+        </div>
+        <div className="flex items-center gap-1">
           <Button
             type="submit"
             disabled={!nameChanged || rename.isPending}
             isLoading={rename.isPending}
-            className="shrink-0 text-[13px] px-5"
+            className={PRIMARY}
           >
             {saved ? (
               <>
@@ -173,40 +233,84 @@ function WorkspaceSection(): ReactElement | null {
               'Save'
             )}
           </Button>
-        </form>
-      ) : (
-        <p className="text-[14px] font-semibold text-[#3D3B4F]">{current.name}</p>
-      )}
+          {dirty && !rename.isPending && (
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setName(current.name)}
+              className="text-[13px] text-[#6E6C7C]"
+            >
+              Cancel
+            </Button>
+          )}
+        </div>
+      </form>
       {error && <p className="text-[12px] text-[#e07a5f]">{error}</p>}
-    </Section>
+    </SectionCard>
   );
 }
 
-/** Owners only; the bulk endpoint skips member workspaces. */
-function TimezoneSection(): ReactElement | null {
+/** Current wall-clock time in `tz`, refreshed every 30s. */
+function useZoneClock(tz: string): { time: string; day: string } | null {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  if (!tz) return null;
+  try {
+    return {
+      time: new Intl.DateTimeFormat('en-GB', {
+        timeZone: tz,
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(now),
+      day: new Intl.DateTimeFormat('en-US', {
+        timeZone: tz,
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+      }).format(now),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One reporting zone for every site. Owners pick and apply it (the bulk
+ * endpoint skips member workspaces); members see it read-only, since it
+ * shapes every chart they read.
+ */
+function TimezoneSection({
+  sites,
+  sitesLoaded,
+}: {
+  sites: SiteRow[];
+  sitesLoaded: boolean;
+}): ReactElement | null {
   const queryClient = useQueryClient();
   const { current } = useWorkspace();
+  const isOwner = current?.role === 'owner';
   const [timezone, setTimezone] = useState('');
   const [applied, setApplied] = useState(false);
 
-  const { data: sitesData } = useQuery({
-    queryKey: ['sites', current?.id],
-    queryFn: () => api.getSites(current!.id),
-    enabled: !!current,
-    staleTime: 60_000,
-  });
-  const sites = ((sitesData as any)?.data ?? []) as { timezone?: string }[];
-  const distinctZones = [...new Set(sites.map(s => s.timezone || 'UTC'))];
+  const zoneOf = (s: SiteRow): string => s.timezone || 'UTC';
+  const distinctZones = [...new Set(sites.map(zoneOf))];
   const uniformZone = distinctZones.length === 1 ? distinctZones[0] : null;
 
-  // Seed the picker once sites load: the shared zone if uniform, else the
-  // browser's zone as the suggested value to unify on.
+  // Seed the picker once per workspace, as soon as its sites load: the
+  // shared zone if uniform, else the browser's zone as the suggested value to
+  // unify on. Keyed by workspace so switching re-seeds instead of carrying
+  // the previous workspace's pick over.
+  const seededFor = useRef<string | null>(null);
   useEffect(() => {
-    if (sites.length > 0 && timezone === '') {
-      setTimezone(uniformZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC');
-    }
+    if (!current || !sitesLoaded || sites.length === 0) return;
+    if (seededFor.current === current.id) return;
+    seededFor.current = current.id;
+    setTimezone(uniformZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sitesData]);
+  }, [current?.id, sitesLoaded, sites]);
 
   const applyTimezone = useMutation({
     mutationFn: () => api.setAllSitesTimezone(timezone, current!.id),
@@ -223,14 +327,74 @@ function TimezoneSection(): ReactElement | null {
     ? ((applyTimezone.error as Error)?.message ?? 'Could not apply the timezone')
     : '';
   const timezoneChanged = timezone !== '' && (uniformZone === null || timezone !== uniformZone);
+  const shownZone = isOwner ? timezone : (uniformZone ?? '');
+  const clock = useZoneClock(shownZone);
 
   if (!current) return null;
 
+  const clockChip = clock && (
+    <div className="flex items-center gap-2 rounded-full bg-[#F2F1ED] px-3 py-1.5">
+      <Clock className="h-3.5 w-3.5 text-[#9B9590]" />
+      <span className="text-[13px] font-semibold tabular-nums text-[#3D3B4F]">{clock.time}</span>
+      <span className="text-[11.5px] text-[#9B9590]">{clock.day}</span>
+    </div>
+  );
+
+  const siteList = sites.length > 0 && (
+    <ul className="grid gap-1">
+      {sites.map(s => {
+        const zone = zoneOf(s);
+        const willChange = isOwner && timezone !== '' && zone !== timezone;
+        return (
+          <li
+            key={s.id}
+            className="flex items-center justify-between gap-3 rounded-[10px] bg-[#F9F8F6] px-3 py-2"
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <SiteFavicon favicon={s.favicon} size={16} fallbackClassName="text-[#9B9590]" />
+              <span className="truncate text-[12.5px] text-[#3D3B4F]">{s.domain || s.name}</span>
+            </span>
+            <span
+              className={`shrink-0 text-[12px] ${willChange ? 'font-medium text-[#c9694f]' : 'text-[#9B9590]'}`}
+            >
+              {zone}
+              {willChange && ' · will change'}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+
+  if (!isOwner) {
+    return (
+      <SectionCard
+        id="timezone"
+        icon={<Globe className="h-4 w-4" />}
+        tone="mint"
+        title="Reporting timezone"
+        sub={
+          uniformZone
+            ? `${uniformZone} (${offsetLabel(uniformZone)}), set by the workspace owner.`
+            : sites.length > 0
+              ? 'Sites use different zones, set by the workspace owner.'
+              : 'Set by the workspace owner.'
+        }
+        aside={clockChip}
+      >
+        {uniformZone === null && siteList}
+      </SectionCard>
+    );
+  }
+
   return (
-    <Section
+    <SectionCard
       id="timezone"
+      icon={<Globe className="h-4 w-4" />}
+      tone="mint"
       title="Reporting timezone"
-      sub="Dashboard days and hours are bucketed in this zone, for every site in the workspace."
+      sub="Where every site's days and hours start and end on the dashboard."
+      aside={clockChip}
     >
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <TimezoneSelect value={timezone} onChange={setTimezone} className="sm:w-[360px]" />
@@ -238,25 +402,28 @@ function TimezoneSection(): ReactElement | null {
           onClick={() => applyTimezone.mutate()}
           disabled={!timezoneChanged || applyTimezone.isPending || sites.length === 0}
           isLoading={applyTimezone.isPending}
-          className="shrink-0 text-[13px] px-5"
+          className={PRIMARY}
         >
           {applied ? (
             <>
               <Check className="h-3.5 w-3.5" />
               Applied
             </>
+          ) : sites.length > 1 ? (
+            `Apply to ${sites.length} sites`
           ) : (
             'Apply'
           )}
         </Button>
       </div>
-      {sites.length === 0 && (
+      {sitesLoaded && sites.length === 0 && (
         <p className="text-[12px] text-[#9B9590]">Add a site first - the zone applies per site.</p>
       )}
+      {siteList}
       {uniformZone === null && sites.length > 0 && (
-        <p className="text-[12px] text-[#e07a5f]">
-          Your sites currently use different timezones ({distinctZones.join(', ')}). Applying will
-          unify them.
+        <p className="text-[12px] text-[#c9694f]">
+          Your sites use different timezones ({distinctZones.join(', ')}). Applying puts them all on
+          one.
         </p>
       )}
       {applyError && (
@@ -268,7 +435,7 @@ function TimezoneSection(): ReactElement | null {
         Takes effect on new data within a minute. Already-collected events keep their original
         bucketing, so past days may look shifted until new data accumulates.
       </p>
-    </Section>
+    </SectionCard>
   );
 }
 
@@ -322,19 +489,14 @@ function DangerSection({ isLastWorkspace }: { isLastWorkspace: boolean }): React
   const deleteBlocked = current.siteCount > 0 || isLastWorkspace;
 
   return (
-    <Section
-      id="danger"
-      title="Danger zone"
-      sub={
-        isOwner
-          ? 'Deleting removes the workspace and its memberships. Sites must be deleted first.'
-          : 'Leaving gives up your access to its sites and dashboards.'
-      }
-      last
-    >
-      <div className="flex flex-col gap-3 rounded-[14px] bg-[#FBEDE8] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <span className="text-[12.5px] leading-relaxed text-[#8A3A27]">
-          {isOwner
+    <>
+      <SectionCard
+        id="danger"
+        icon={isOwner ? <Trash2 className="h-4 w-4" /> : <LogOut className="h-4 w-4" />}
+        tone="coral"
+        title={isOwner ? 'Delete workspace' : 'Leave workspace'}
+        sub={
+          isOwner
             ? current.siteCount > 0
               ? `${current.siteCount} ${
                   current.siteCount === 1 ? 'site still lives' : 'sites still live'
@@ -344,33 +506,36 @@ function DangerSection({ isLastWorkspace }: { isLastWorkspace: boolean }): React
                 : 'The workspace is empty. Members lose access and pending invites stop working.'
             : workspaces.length <= 1
               ? 'This is your only workspace here - leaving also removes your account on this instance.'
-              : 'Your other workspaces are unaffected.'}
-        </span>
-        {isOwner ? (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setConfirmOpen(true)}
-            disabled={remove.isPending}
-            className="shrink-0 text-[12px] text-[#e5484d] hover:text-[#e5484d]"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            Delete workspace
-          </Button>
-        ) : (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setLeaveOpen(true)}
-            disabled={leave.isPending}
-            className="shrink-0 text-[12px] text-[#e5484d] hover:text-[#e5484d]"
-          >
-            <LogOut className="h-3.5 w-3.5" />
-            Leave workspace
-          </Button>
-        )}
-      </div>
-      {error && <p className="text-[12px] text-[#e07a5f]">{error}</p>}
+              : 'You give up access to its sites and dashboards. Your other workspaces are unaffected.'
+        }
+        aside={
+          isOwner ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setConfirmOpen(true)}
+              disabled={remove.isPending}
+              className="shrink-0 text-[12px] text-[#e07a5f] shadow-[inset_0_0_0_1px_#f1c9bd] hover:text-[#c9694f] hover:shadow-[inset_0_0_0_1px_#e8a996]"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete workspace
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setLeaveOpen(true)}
+              disabled={leave.isPending}
+              className="shrink-0 text-[12px] text-[#e07a5f] shadow-[inset_0_0_0_1px_#f1c9bd] hover:text-[#c9694f] hover:shadow-[inset_0_0_0_1px_#e8a996]"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Leave workspace
+            </Button>
+          )
+        }
+      >
+        {error && <p className="text-[12px] text-[#e07a5f]">{error}</p>}
+      </SectionCard>
 
       <Dialog open={leaveOpen} onOpenChange={setLeaveOpen}>
         <DialogContent onClose={() => setLeaveOpen(false)} className="max-w-md">
@@ -451,6 +616,6 @@ function DangerSection({ isLastWorkspace }: { isLastWorkspace: boolean }): React
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </Section>
+    </>
   );
 }
