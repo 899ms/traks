@@ -6,6 +6,12 @@ ships separately and is not listed here.
 
 ## Unreleased
 
+## 0.1.43 - 2026-09-23
+
+### Changed
+
+- Removed an unused rate-limit check from the public dashboard API. Public dashboards behave exactly as in 0.1.42.
+
 ## 0.1.42 - 2026-09-23
 
 ### Added
