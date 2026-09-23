@@ -35,15 +35,6 @@ function sectionFor(endpoint: string): Section | null {
   }
 }
 
-/** Throttle anonymous readers per IP. Each distinct filter is a fresh R2 SQL
- *  scan, so an open share link must not be a free query engine. */
-async function throttled(c: Context<Env>): Promise<boolean> {
-  if (!c.env.PUBLIC_LIMIT) return false;
-  const ip = c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown';
-  const { success } = await c.env.PUBLIC_LIMIT.limit({ key: ip });
-  return !success;
-}
-
 async function loadPublicSite(
   c: Context<Env>,
   siteId: string
@@ -73,7 +64,6 @@ export async function publicAnalyticsGate(c: Context<Env>, next: Next): Promise<
 
   const section = sectionFor(endpoint);
   if (!section) return notFound();
-  if (await throttled(c)) return c.json({ error: 'Too many requests. Try again in a minute' }, 429);
 
   const site = await loadPublicSite(c, siteId);
   if (!site) return notFound();
@@ -90,7 +80,6 @@ export async function publicAnalyticsGate(c: Context<Env>, next: Next): Promise<
 
 /** Share-page bootstrap: who the site is and which sections it shares. */
 export const publicRoute = new Hono<Env>().get('/sites/:siteId', async c => {
-  if (await throttled(c)) return c.json({ error: 'Too many requests. Try again in a minute' }, 429);
   const site = await loadPublicSite(c, c.req.param('siteId'));
   if (!site) return c.json({ error: 'Not found' }, 404);
 

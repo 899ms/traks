@@ -23,9 +23,6 @@ export type Bindings = {
   COLLECT_URL: string;
   /** IP-scoped brute-force guard on /api/auth/* (see wrangler.toml). */
   AUTH_LIMIT?: { limit(o: { key: string }): Promise<{ success: boolean }> };
-  /** IP-scoped guard on the unauthenticated public dashboard API. Optional:
-   *  instances deployed before the binding existed simply run unthrottled. */
-  PUBLIC_LIMIT?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   /** Set by the deploy wizard on user instances: the Cloudflare account email
    *  the instance was deployed with. When present, only this email can claim
    *  the instance (first sign-up), and the claim screen locks the field. */
