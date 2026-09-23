@@ -7,12 +7,15 @@ import {
   LogOut,
   ArrowUpCircle,
   X,
-  Bot,
+  Globe,
   RefreshCw,
   Trash2,
   AlertTriangle,
   ExternalLink,
   Mail,
+  Copy,
+  Check,
+  Github,
 } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { destroyUrl, updateUrl, useInstanceConfig, useLatestVersion } from '@/lib/config';
@@ -118,6 +121,7 @@ function PortalHeader(): React.ReactNode {
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <VersionPill />
+          <ContactButton />
           <UserMenu />
         </div>
       </div>
@@ -249,10 +253,27 @@ function VersionPill(): React.ReactNode {
   );
 }
 
+/** Header shortcut to the contact modal (also in the account menu). */
+function ContactButton(): React.ReactNode {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        aria-label="Contact us"
+        title="Contact us"
+        className="flex h-9 w-9 items-center justify-center rounded-full border border-transparent text-[#6E6C7C] transition-colors hover:border-[#E6E4DE] hover:bg-[#F2F1ED] hover:text-[#3D3B4F] cursor-pointer"
+      >
+        <Mail className="h-[18px] w-[18px]" strokeWidth={1.8} />
+      </button>
+      <ContactDialog open={open} onOpenChange={setOpen} />
+    </>
+  );
+}
+
 function UserMenu(): React.ReactNode {
   const { data: session } = authClient.useSession();
   const config = useInstanceConfig();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [checking, setChecking] = useState(false);
   const [checkNote, setCheckNote] = useState<string | null>(null);
@@ -288,10 +309,12 @@ function UserMenu(): React.ReactNode {
   };
 
   const [destroyOpen, setDestroyOpen] = useState(false);
+  const [contactOpen, setContactOpen] = useState(false);
 
   return (
     <>
       <DestroyDialog open={destroyOpen} onOpenChange={setDestroyOpen} />
+      <ContactDialog open={contactOpen} onOpenChange={setContactOpen} />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button className="flex items-center gap-2 pl-1.5 pr-3 py-1.5 rounded-full bg-white border border-[#E6E4DE] transition-colors hover:border-[#D8D5CD] focus:outline-none">
@@ -317,19 +340,20 @@ function UserMenu(): React.ReactNode {
           <DropdownMenuSeparator />
 
           {/* Everyday actions first, then instance-level ones, sign-out last. */}
-          <DropdownMenuItem
-            onClick={() => void navigate({ to: '/portal/mcp' })}
-            className="flex items-center gap-3 px-4 py-2.5 cursor-pointer"
-          >
-            <Bot className="w-4 h-4 text-[#9B9590]" />
-            MCP server &amp; tokens
+          <DropdownMenuItem asChild className="flex items-center gap-3 px-4 py-2.5 cursor-pointer">
+            <a href="https://traks.dev" target="_blank" rel="noopener noreferrer">
+              <Globe className="w-4 h-4 text-[#9B9590]" />
+              <span className="flex-1">traks.dev</span>
+              <ExternalLink className="w-3.5 h-3.5 text-[#B5B0AA]" />
+            </a>
           </DropdownMenuItem>
 
-          <DropdownMenuItem asChild className="flex items-center gap-3 px-4 py-2.5 cursor-pointer">
-            <a href="mailto:hello@traks.dev">
-              <Mail className="w-4 h-4 text-[#9B9590]" />
-              Contact us
-            </a>
+          <DropdownMenuItem
+            onClick={() => setContactOpen(true)}
+            className="flex items-center gap-3 px-4 py-2.5 cursor-pointer"
+          >
+            <Mail className="w-4 h-4 text-[#9B9590]" />
+            Contact us
           </DropdownMenuItem>
 
           {config?.version && (
@@ -373,6 +397,140 @@ function UserMenu(): React.ReactNode {
         </DropdownMenuContent>
       </DropdownMenu>
     </>
+  );
+}
+
+const CONTACT_EMAIL = 'hello@traks.dev';
+const ISSUES_URL = 'https://github.com/shivamanupadi/traks/issues';
+
+/**
+ * How to reach us, shown in place rather than handing off to a mail client
+ * (a mailto: does nothing on machines without one configured). The address
+ * is selectable text with a copy button; bug reports get the instance's
+ * version and name to paste along.
+ */
+function ContactDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}): React.ReactNode {
+  const config = useInstanceConfig();
+  const [copied, setCopied] = useState<'email' | 'details' | null>(null);
+  const details = [
+    config?.version && `Traks v${config.version}`,
+    config?.instanceName && `instance ${config.instanceName}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  useEffect(() => {
+    if (!open) setCopied(null);
+  }, [open]);
+
+  const copy = (text: string, what: 'email' | 'details', fallbackId: string): void => {
+    navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        setCopied(what);
+        setTimeout(() => setCopied(c => (c === what ? null : c)), 2000);
+      })
+      .catch(() => {
+        // Clipboard refused (permissions, insecure origin): select the text
+        // so a manual copy is one keystroke away.
+        const el = document.getElementById(fallbackId);
+        if (el) window.getSelection()?.selectAllChildren(el);
+      });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent onClose={() => onOpenChange(false)} className="max-w-md">
+        <DialogHeader>
+          <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-[13px] bg-[#28E99F]/20">
+            <img src="/logo.svg" alt="" className="h-6 w-6" />
+          </div>
+          <DialogTitle>Contact the Traks team</DialogTitle>
+          <DialogDescription>
+            Questions, ideas, something broken? Write to us and we&rsquo;ll get back to you.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-3 rounded-[14px] bg-[#F2F1ED] py-2 pl-4 pr-2">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#9B9590]">
+                Email
+              </p>
+              <p
+                id="contact-email"
+                className="select-all truncate text-[14px] font-semibold text-[#3D3B4F]"
+              >
+                {CONTACT_EMAIL}
+              </p>
+            </div>
+            <button
+              onClick={() => copy(CONTACT_EMAIL, 'email', 'contact-email')}
+              className="flex shrink-0 items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-[12px] font-semibold text-[#3D3B4F] shadow-[0_0_0_1px_#E6E4DE] hover:bg-[#F9F8F6] transition-colors cursor-pointer"
+            >
+              {copied === 'email' ? (
+                <>
+                  <Check className="h-3.5 w-3.5 text-[#1FC285]" />
+                  Copied
+                </>
+              ) : (
+                <>
+                  <Copy className="h-3.5 w-3.5" />
+                  Copy
+                </>
+              )}
+            </button>
+          </div>
+
+          <a
+            href={ISSUES_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-between gap-3 rounded-[14px] border border-[#E6E4DE] px-4 py-3 hover:bg-[#F9F8F6] transition-colors"
+          >
+            <span className="flex min-w-0 items-center gap-3">
+              <Github className="h-4 w-4 shrink-0 text-[#3D3B4F]" strokeWidth={1.8} />
+              <span className="min-w-0">
+                <span className="block text-[13px] font-semibold text-[#3D3B4F]">
+                  Report a bug or request a feature
+                </span>
+                <span className="block truncate text-[12px] text-[#9B9590]">
+                  Open an issue on GitHub
+                </span>
+              </span>
+            </span>
+            <ExternalLink className="h-3.5 w-3.5 shrink-0 text-[#9B9590]" />
+          </a>
+
+          {details && (
+            <div className="flex items-center justify-between gap-3 px-1">
+              <p className="min-w-0 text-[12px] leading-relaxed text-[#9B9590]">
+                Reporting a problem? Include{' '}
+                <span id="contact-details" className="select-all font-mono text-[#6E6C7C]">
+                  {details}
+                </span>
+              </p>
+              <button
+                onClick={() => copy(details, 'details', 'contact-details')}
+                className="shrink-0 text-[12px] font-semibold text-[#6E6C7C] hover:text-[#3D3B4F] transition-colors cursor-pointer"
+              >
+                {copied === 'details' ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+          )}
+        </DialogBody>
+        <DialogFooter className="mx-6 border-t border-[#e6e5ea]/50 px-0 pb-5 pt-4">
+          <Button onClick={() => onOpenChange(false)} className="px-5 text-[13px] shadow-none">
+            Done
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

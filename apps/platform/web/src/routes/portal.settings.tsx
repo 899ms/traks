@@ -25,10 +25,10 @@ export const Route = createFileRoute('/portal/settings')({
 
 const CARD = 'rounded-[20px] bg-white p-5 shadow-float sm:p-6';
 
-/** Section icon tiles: one hue per section so the page reads at a glance. */
+/** Section icon tiles: brand ink + mint for settings, coral for delete / leave. */
 const TONE = {
-  lavender: 'bg-[#eceff9] text-[#4c5b8f]',
-  mint: 'bg-[#dcf6ea] text-[#17875c]',
+  // Brand: the logo's ink on a light wash of its mint.
+  brand: 'bg-[#28E99F]/20 text-[#3D3B4F]',
   coral: 'bg-[#fbe9e3] text-[#c9694f]',
 } as const;
 
@@ -115,18 +115,6 @@ function SectionCard({
   );
 }
 
-function RolePill({ role }: { role: 'owner' | 'member' }): ReactElement {
-  return role === 'owner' ? (
-    <span className="inline-flex rounded-full bg-[#3D3B4F] px-2 py-0.5 text-[11px] font-medium text-white">
-      Owner
-    </span>
-  ) : (
-    <span className="inline-flex rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-[#6E6C7C] shadow-[inset_0_0_0_1px_#E6E4DE]">
-      Member
-    </span>
-  );
-}
-
 /** Title like every other tab, plus the workspace's role, sites and members. */
 function PageHeader(): ReactElement {
   const { current } = useWorkspace();
@@ -144,15 +132,29 @@ function PageHeader(): ReactElement {
     <div className="mb-6">
       <h1 className="text-[26px] font-bold text-[#3D3B4F] tracking-[-0.02em]">Settings</h1>
       {current ? (
-        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[14px] text-[#9B9590]">
-          <span>For the {current.name} workspace.</span>
-          <RolePill role={current.role} />
-          <span className="text-[13px]">
+        <>
+          <p className="mt-1 text-[14px] text-[#9B9590]">
+            For the <span className="font-semibold text-[#3D3B4F]">{current.name}</span> workspace
+            {' · '}
             {current.siteCount} {current.siteCount === 1 ? 'site' : 'sites'}
             {memberCount !== undefined &&
               ` · ${memberCount} ${memberCount === 1 ? 'member' : 'members'}`}
-          </span>
-        </p>
+          </p>
+          {/* Said in words, not just a pill: what the role lets you do here. */}
+          <p className="mt-2 text-[13.5px] text-[#6E6C7C]">
+            {current.role === 'owner' ? (
+              <>
+                You are an <span className="font-semibold text-[#3D3B4F]">owner</span> of this
+                workspace, so you can rename it, set its timezone and delete it.
+              </>
+            ) : (
+              <>
+                You are a <span className="font-semibold text-[#3D3B4F]">member</span> of this
+                workspace. You can view its dashboards; only an owner can change these settings.
+              </>
+            )}
+          </p>
+        </>
       ) : (
         <p className="mt-1 text-[14px] text-[#9B9590]">Workspace preferences.</p>
       )}
@@ -195,7 +197,7 @@ function WorkspaceSection(): ReactElement | null {
     <SectionCard
       id="workspace"
       icon={<Pencil className="h-4 w-4" />}
-      tone="lavender"
+      tone="brand"
       title="Workspace name"
       sub="Shown in the header switcher and on invitations."
     >
@@ -371,7 +373,7 @@ function TimezoneSection({
       <SectionCard
         id="timezone"
         icon={<Globe className="h-4 w-4" />}
-        tone="mint"
+        tone="brand"
         title="Reporting timezone"
         sub={
           uniformZone
@@ -391,7 +393,7 @@ function TimezoneSection({
     <SectionCard
       id="timezone"
       icon={<Globe className="h-4 w-4" />}
-      tone="mint"
+      tone="brand"
       title="Reporting timezone"
       sub="Where every site's days and hours start and end on the dashboard."
       aside={clockChip}
