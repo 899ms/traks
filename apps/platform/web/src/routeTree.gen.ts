@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as PortalRouteImport } from './routes/portal'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as PortalTokensRouteImport } from './routes/portal.tokens'
 import { Route as PortalSkillRouteImport } from './routes/portal.skill'
 import { Route as PortalSitesRouteImport } from './routes/portal.sites'
 import { Route as PortalSettingsRouteImport } from './routes/portal.settings'
@@ -35,6 +36,11 @@ const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const PortalTokensRoute = PortalTokensRouteImport.update({
+  id: '/tokens',
+  path: '/tokens',
+  getParentRoute: () => PortalRoute,
 } as any)
 const PortalSkillRoute = PortalSkillRouteImport.update({
   id: '/skill',
@@ -90,6 +96,7 @@ export interface FileRoutesByFullPath {
   '/portal/settings': typeof PortalSettingsRoute
   '/portal/sites': typeof PortalSitesRoute
   '/portal/skill': typeof PortalSkillRoute
+  '/portal/tokens': typeof PortalTokensRoute
   '/portal/site/$siteId': typeof PortalSiteSiteIdRoute
 }
 export interface FileRoutesByTo {
@@ -103,6 +110,7 @@ export interface FileRoutesByTo {
   '/portal/settings': typeof PortalSettingsRoute
   '/portal/sites': typeof PortalSitesRoute
   '/portal/skill': typeof PortalSkillRoute
+  '/portal/tokens': typeof PortalTokensRoute
   '/portal/site/$siteId': typeof PortalSiteSiteIdRoute
 }
 export interface FileRoutesById {
@@ -117,6 +125,7 @@ export interface FileRoutesById {
   '/portal/settings': typeof PortalSettingsRoute
   '/portal/sites': typeof PortalSitesRoute
   '/portal/skill': typeof PortalSkillRoute
+  '/portal/tokens': typeof PortalTokensRoute
   '/portal/site/$siteId': typeof PortalSiteSiteIdRoute
 }
 export interface FileRouteTypes {
@@ -132,6 +141,7 @@ export interface FileRouteTypes {
     | '/portal/settings'
     | '/portal/sites'
     | '/portal/skill'
+    | '/portal/tokens'
     | '/portal/site/$siteId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -145,6 +155,7 @@ export interface FileRouteTypes {
     | '/portal/settings'
     | '/portal/sites'
     | '/portal/skill'
+    | '/portal/tokens'
     | '/portal/site/$siteId'
   id:
     | '__root__'
@@ -158,6 +169,7 @@ export interface FileRouteTypes {
     | '/portal/settings'
     | '/portal/sites'
     | '/portal/skill'
+    | '/portal/tokens'
     | '/portal/site/$siteId'
   fileRoutesById: FileRoutesById
 }
@@ -190,6 +202,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/portal/tokens': {
+      id: '/portal/tokens'
+      path: '/tokens'
+      fullPath: '/portal/tokens'
+      preLoaderRoute: typeof PortalTokensRouteImport
+      parentRoute: typeof PortalRoute
     }
     '/portal/skill': {
       id: '/portal/skill'
@@ -257,6 +276,7 @@ interface PortalRouteChildren {
   PortalSettingsRoute: typeof PortalSettingsRoute
   PortalSitesRoute: typeof PortalSitesRoute
   PortalSkillRoute: typeof PortalSkillRoute
+  PortalTokensRoute: typeof PortalTokensRoute
   PortalSiteSiteIdRoute: typeof PortalSiteSiteIdRoute
 }
 
@@ -267,6 +287,7 @@ const PortalRouteChildren: PortalRouteChildren = {
   PortalSettingsRoute: PortalSettingsRoute,
   PortalSitesRoute: PortalSitesRoute,
   PortalSkillRoute: PortalSkillRoute,
+  PortalTokensRoute: PortalTokensRoute,
   PortalSiteSiteIdRoute: PortalSiteSiteIdRoute,
 }
 

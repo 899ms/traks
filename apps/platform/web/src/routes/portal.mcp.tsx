@@ -1,19 +1,15 @@
-import { useState, type FormEvent, type ReactElement, type ReactNode } from 'react';
+import { useState, type ReactElement, type ReactNode } from 'react';
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, ChevronDown, Copy, Download, KeyRound, Plus, Trash2 } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Check, ChevronDown, Copy, Download, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogBody,
-  DialogFooter,
-} from '@/components/ui/dialog';
+  CreateTokenModal,
+  ScopePill,
+  maskedToken,
+  type TokenRow,
+} from '@/components/tokens/tokens';
 import { api } from '@/lib/api';
 import { useWorkspace } from '@/lib/workspace';
 import { useCollectUrl } from '@/lib/config';
@@ -155,26 +151,14 @@ const TOOLS: { name: string; desc: string; manage?: boolean }[] = [
 
 /* ── page ───────────────────────────────────────────────────────── */
 
-interface TokenRow {
-  id: string;
-  name: string;
-  suffix: string;
-  scope: 'read' | 'manage';
-  workspaceId: string | null;
-  createdAt: string | null;
-  lastUsedAt: string | null;
-}
-
-type Scope = 'read' | 'manage';
-
 const CARD = 'rounded-[20px] bg-white shadow-float';
 const EYEBROW = 'text-[10.5px] font-bold uppercase tracking-[0.1em] text-[#9B9590]';
 
 /**
- * MCP server: the endpoint strip, a guided "connect a client" stepper (pick
- * a client, pick or mint a token, paste that client's config, add the skill)
- * beside the tool reference, over the table of tokens bound to the current
- * workspace.
+ * MCP server: the endpoint strip, then a guided "connect a client" stepper
+ * (pick a client, pick or mint a token, paste that client's config, add the
+ * skill) beside the tool reference. Tokens themselves are managed on the API
+ * tokens tab.
  */
 function McpPage(): ReactElement {
   const queryClient = useQueryClient();
@@ -190,7 +174,6 @@ function McpPage(): ReactElement {
   const [minted, setMinted] = useState<{ id: string; secret: string } | null>(null);
   const [creating, setCreating] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
-  const [error, setError] = useState('');
 
   // Only this workspace's tokens (plus legacy unscoped ones, which apply
   // everywhere and must stay revocable from somewhere).
@@ -206,16 +189,6 @@ function McpPage(): ReactElement {
     queryClient.invalidateQueries({ queryKey: ['api-tokens'] });
   };
 
-  const revokeToken = useMutation({
-    mutationFn: (id: string) => api.revokeToken(id),
-    onSuccess: (_res, id) => {
-      if (tokenId === id) setTokenId('');
-      if (minted?.id === id) setMinted(null);
-      invalidate();
-    },
-    onError: (err: Error) => setError(err.message),
-  });
-
   const copy = async (text: string, tag: string): Promise<void> => {
     await navigator.clipboard.writeText(text);
     setCopied(tag);
@@ -227,7 +200,7 @@ function McpPage(): ReactElement {
   const snippetToken = minted
     ? minted.secret
     : selected
-      ? `traks_pat_…${selected.suffix}  ⟵ paste the full token`
+      ? `${maskedToken(selected.suffix)}  ⟵ paste the full token`
       : '<token>';
   const cfg = buildConfig(client, mcpUrl, snippetToken);
 
@@ -334,7 +307,7 @@ function McpPage(): ReactElement {
                     <option value="">Select a token…</option>
                     {tokens.map(t => (
                       <option key={t.id} value={t.id}>
-                        traks_pat_…{t.suffix} · {t.name}
+                        {maskedToken(t.suffix)} · {t.name}
                       </option>
                     ))}
                   </select>
@@ -368,7 +341,13 @@ function McpPage(): ReactElement {
               ) : (
                 <p className="mt-2 text-[12px] leading-relaxed text-[#9B9590]">
                   Stored tokens are hashed, so an existing token leaves a blank to fill in. Create
-                  one here to get a paste-ready config.
+                  one here to get a paste-ready config.{' '}
+                  <Link
+                    to="/portal/tokens"
+                    className="font-semibold text-[#6E6C7C] underline-offset-2 hover:text-[#3D3B4F] hover:underline"
+                  >
+                    Manage tokens
+                  </Link>
                 </p>
               )}
             </Step>
@@ -429,91 +408,11 @@ function McpPage(): ReactElement {
               >
                 <code className="font-mono text-[12px] font-semibold text-[#3D3B4F]">{t.name}</code>
                 <span className="min-w-0 flex-1 text-[12px] text-[#6E6C7C]">{t.desc}</span>
-                {t.manage && (
-                  <span className="inline-flex shrink-0 rounded-full bg-[#3D3B4F] px-2 py-0.5 text-[10px] font-medium leading-4 text-white">
-                    Manage
-                  </span>
-                )}
+                {t.manage && <ScopePill scope="manage" />}
               </div>
             ))}
           </div>
         </div>
-      </div>
-
-      {/* Tokens table */}
-      <div className={`${CARD} mt-4 overflow-hidden`}>
-        <div className="flex items-center justify-between gap-3 px-5 pb-2 pt-4">
-          <p className="text-[14px] font-semibold text-[#3D3B4F]">
-            Active tokens
-            {current && (
-              <span className="ml-2 text-[12px] font-normal text-[#9B9590]">{current.name}</span>
-            )}
-          </p>
-          <p className="text-[12px] text-[#9B9590]">Revoking takes effect immediately</p>
-        </div>
-        {error && <p className="px-5 pb-2 text-[12px] text-[#e07a5f]">{error}</p>}
-
-        {tokens.length === 0 ? (
-          <p className="border-t border-[#F2F1ED] px-5 py-8 text-center text-[13px] text-[#9B9590]">
-            {tokensQ.isPending ? 'Loading…' : 'No tokens in this workspace yet - create one above.'}
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <div className="min-w-[720px]">
-              <div
-                className={`grid grid-cols-[minmax(0,2fr)_110px_140px_130px_40px] gap-3 px-4 py-2 ${EYEBROW}`}
-              >
-                <span>Name</span>
-                <span>Scope</span>
-                <span>Last used</span>
-                <span>Created</span>
-                <span />
-              </div>
-              {tokens.map(t => (
-                <div
-                  key={t.id}
-                  className="grid grid-cols-[minmax(0,2fr)_110px_140px_130px_40px] items-center gap-3 border-t border-[#F2F1ED] px-4 py-3"
-                >
-                  <div className="flex min-w-0 items-center gap-3">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] bg-[#F2F1ED] text-[#6E6C7C]">
-                      <KeyRound className="h-3.5 w-3.5" strokeWidth={1.8} />
-                    </span>
-                    <div className="flex min-w-0 flex-col">
-                      <span className="truncate text-[13px] font-semibold text-[#3D3B4F]">
-                        {t.name}
-                      </span>
-                      <span className="truncate font-mono text-[11px] text-[#9B9590]">
-                        traks_pat_…{t.suffix}
-                        {t.workspaceId === null && (
-                          <span className="ml-2 font-sans">· all workspaces (legacy)</span>
-                        )}
-                      </span>
-                    </div>
-                  </div>
-                  <span>
-                    <ScopePill scope={t.scope} />
-                  </span>
-                  <span
-                    className={`text-[12.5px] ${t.lastUsedAt ? 'text-[#6E6C7C]' : 'text-[#B5B0AA]'}`}
-                  >
-                    {t.lastUsedAt ? formatDate(t.lastUsedAt) : 'Never used'}
-                  </span>
-                  <span className="text-[12.5px] text-[#6E6C7C]">
-                    {t.createdAt ? formatDate(t.createdAt) : '—'}
-                  </span>
-                  <button
-                    onClick={() => revokeToken.mutate(t.id)}
-                    disabled={revokeToken.isPending}
-                    title="Revoke token"
-                    className="flex h-7 w-7 items-center justify-center rounded-lg text-[#B5B0AA] transition-colors hover:bg-[#e07a5f]/10 hover:text-[#e07a5f] cursor-pointer"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
 
       {current && (
@@ -523,9 +422,10 @@ function McpPage(): ReactElement {
           workspaceId={current.id}
           workspaceName={current.name}
           defaultName={CLIENTS.find(c => c.id === client)?.label ?? ''}
-          onCreated={(id, secret) => {
-            setMinted({ id, secret });
-            setTokenId(id);
+          hint="The new token drops straight into step 2 and the config snippet."
+          onCreated={(token, secret) => {
+            setMinted({ id: token.id, secret });
+            setTokenId(token.id);
             invalidate();
           }}
         />
@@ -568,157 +468,4 @@ function Step({
       <div className={cn('min-w-0', !last && 'pb-6')}>{children}</div>
     </>
   );
-}
-
-function CreateTokenModal({
-  open,
-  onOpenChange,
-  workspaceId,
-  workspaceName,
-  defaultName,
-  onCreated,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  workspaceId: string;
-  workspaceName: string;
-  defaultName: string;
-  onCreated: (id: string, secret: string) => void;
-}): ReactElement {
-  const [name, setName] = useState('');
-  const [scope, setScope] = useState<Scope>('manage');
-
-  const create = useMutation({
-    mutationFn: () => api.createToken({ name: name.trim(), scope, workspaceId }),
-    onSuccess: (result: any) => {
-      onCreated(result.data?.id as string, result.secret as string);
-      setName('');
-      setScope('manage');
-      onOpenChange(false);
-    },
-  });
-
-  const close = (): void => {
-    create.reset();
-    onOpenChange(false);
-  };
-
-  const submit = (e: FormEvent): void => {
-    e.preventDefault();
-    if (name.trim()) create.mutate();
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={o => (o ? onOpenChange(true) : close())}>
-      <DialogContent onClose={close} className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Create a token</DialogTitle>
-          <DialogDescription>
-            Bound to {workspaceName}. Shown once, then only its suffix.
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={submit}>
-          <DialogBody>
-            <div className="space-y-4">
-              <label className="block">
-                <span className="mb-1.5 block text-[12px] font-semibold text-[#6E6C7C]">Name</span>
-                <Input
-                  autoFocus
-                  placeholder={defaultName || 'e.g. Claude Code'}
-                  value={name}
-                  maxLength={100}
-                  onChange={e => setName(e.target.value)}
-                  className="h-10 bg-[#F2F1ED] px-4 text-[13px] focus:shadow-[inset_0_0_0_1.5px_var(--ring)]"
-                />
-              </label>
-              <div>
-                <span className="mb-1.5 block text-[12px] font-semibold text-[#6E6C7C]">Scope</span>
-                <ScopeToggle value={scope} onChange={setScope} />
-                <p className="mt-2 text-[12px] leading-relaxed text-[#9B9590]">
-                  Manage can create and edit goals and funnels. Read-only sees stats. The new token
-                  drops straight into step 2 and the config snippet.
-                </p>
-              </div>
-              {create.error && (
-                <p className="text-[12px] text-[#e07a5f]">{(create.error as Error).message}</p>
-              )}
-            </div>
-          </DialogBody>
-          <DialogFooter>
-            <Button type="button" variant="ghost" size="sm" onClick={close}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              size="sm"
-              disabled={name.trim().length === 0}
-              isLoading={create.isPending}
-              className="text-[12px] px-4"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Create token
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/** Flat two-way switch: inset track, white active segment with a hairline. */
-function ScopeToggle({
-  value,
-  onChange,
-}: {
-  value: Scope;
-  onChange: (s: Scope) => void;
-}): ReactElement {
-  const seg = (s: Scope, label: string): ReactElement => (
-    <button
-      type="button"
-      onClick={() => onChange(s)}
-      className={`rounded-full px-3 py-[5px] text-[12px] transition-colors cursor-pointer ${
-        value === s
-          ? 'bg-white font-semibold text-[#3D3B4F] shadow-[inset_0_0_0_1px_#E6E4DE]'
-          : 'text-[#6E6C7C] hover:text-[#3D3B4F]'
-      }`}
-    >
-      {label}
-    </button>
-  );
-  return (
-    <div className="inline-flex rounded-full bg-[#F2F1ED] p-[3px]">
-      {seg('manage', 'Manage')}
-      {seg('read', 'Read-only')}
-    </div>
-  );
-}
-
-function ScopePill({ scope }: { scope: Scope }): ReactElement {
-  return scope === 'manage' ? (
-    <span className="inline-flex rounded-full bg-[#3D3B4F] px-2 py-0.5 text-[11px] font-medium text-white">
-      Manage
-    </span>
-  ) : (
-    <span className="inline-flex rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-[#6E6C7C] shadow-[inset_0_0_0_1px_#E6E4DE]">
-      Read-only
-    </span>
-  );
-}
-
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  const now = new Date();
-  const sameDay = d.toDateString() === now.toDateString();
-  if (sameDay) {
-    return `Today, ${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
-  }
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
-  return d.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric',
-  });
 }

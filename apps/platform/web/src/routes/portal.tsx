@@ -115,6 +115,7 @@ function PortalHeader(): React.ReactNode {
             </HeaderTab>
             <HeaderTab to="/portal/skill">Skill</HeaderTab>
             <HeaderTab to="/portal/mcp">MCP server</HeaderTab>
+            <HeaderTab to="/portal/tokens">API tokens</HeaderTab>
             {current?.role === 'owner' && <HeaderTab to="/portal/members">Members</HeaderTab>}
             <HeaderTab to="/portal/settings">Settings</HeaderTab>
           </nav>
