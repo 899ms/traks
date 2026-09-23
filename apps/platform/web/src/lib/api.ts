@@ -235,6 +235,21 @@ export const api = {
   },
 
   // Goals
+  /** Public dashboard switches (owners). Send only what changes. */
+  async updateSiteSharing(
+    siteId: string,
+    data: {
+      public?: boolean;
+      publicGoals?: boolean;
+      publicFunnels?: boolean;
+      publicEvents?: boolean;
+    }
+  ): Promise<any> {
+    const res = await client.api.sites[':id'].sharing.$patch({ param: { id: siteId }, json: data });
+    await assertOk(res);
+    return res.json();
+  },
+
   async getGoals(siteId: string): Promise<any> {
     const res = await client.api.sites[':id'].goals.$get({ param: { id: siteId } });
     await assertOk(res);

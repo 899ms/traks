@@ -23,6 +23,9 @@ export type Bindings = {
   COLLECT_URL: string;
   /** IP-scoped brute-force guard on /api/auth/* (see wrangler.toml). */
   AUTH_LIMIT?: { limit(o: { key: string }): Promise<{ success: boolean }> };
+  /** IP-scoped guard on the unauthenticated public dashboard API. Optional:
+   *  instances deployed before the binding existed simply run unthrottled. */
+  PUBLIC_LIMIT?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   /** Set by the deploy wizard on user instances: the Cloudflare account email
    *  the instance was deployed with. When present, only this email can claim
    *  the instance (first sign-up), and the claim screen locks the field. */
@@ -53,5 +56,9 @@ export type Variables = {
   tokenScope?: 'read' | 'manage';
   /** The token's workspace binding - site access is constrained to it. */
   tokenWorkspaceId?: string;
+  /** Set ONLY by publicAnalyticsGate (routes/public.ts) once it has verified
+   *  the site is public and the requested section is shared. Analytics
+   *  handlers then serve that one site without a signed-in user. */
+  publicSite?: { siteId: string; timezone: string };
   db?: import('drizzle-orm/d1').DrizzleD1Database;
 };

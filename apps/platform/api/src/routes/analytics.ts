@@ -1,4 +1,4 @@
-import { Hono, type Context } from 'hono';
+import { Hono, type Context, type Next } from 'hono';
 import { z } from 'zod';
 import { validate } from '../lib/validate';
 import { eq, and, inArray } from 'drizzle-orm';
@@ -66,6 +66,17 @@ type AppContext = Context<Env>;
 
 const app = new Hono<Env>();
 
+/**
+ * Auth for the endpoints a public share page may call. Requests reaching
+ * these routes through /api/public/analytics have already been cleared by
+ * publicAnalyticsGate (which alone sets `publicSite`); everyone else must be
+ * signed in as usual.
+ */
+async function authOrPublic(c: AppContext, next: Next): Promise<Response | void> {
+  if (c.get('publicSite')) return next();
+  return requireAuth(c, next);
+}
+
 interface SiteRecord {
   siteId: string;
   timezone: string;
@@ -79,7 +90,20 @@ interface SiteRecord {
  * timezone after a settings change. It is one indexed D1 read, negligible
  * beside the R2 SQL scan every caller goes on to make.
  */
-async function getSite(c: AppContext, siteId: string, userId: string): Promise<SiteRecord | null> {
+async function getSite(
+  c: AppContext,
+  siteId: string,
+  userId: string | undefined
+): Promise<SiteRecord | null> {
+  // Share page: publicAnalyticsGate already proved this site is public and
+  // the endpoint's section is shared. Serve exactly that site, nothing else.
+  const shared = c.get('publicSite');
+  if (shared) {
+    if (shared.siteId !== siteId) return null;
+    noteSiteView(c.env, c.executionCtx, shared.siteId, c.req.query());
+    return shared;
+  }
+  if (!userId) return null;
   const db = c.get('db')!;
   const [result] = await db
     .select({ siteId: sites.id, timezone: sites.timezone })
@@ -1054,7 +1078,7 @@ export const analyticsRoute = appWithBatch
     return c.body(null, 204);
   })
 
-  .get('/:siteId/stats/all', requireAuth, validate('query', periodQuery), async c => {
+  .get('/:siteId/stats/all', authOrPublic, validate('query', periodQuery), async c => {
     const userId = c.get('userId')!;
     const siteId = c.req.param('siteId');
     const query = c.req.valid('query');
@@ -1077,7 +1101,7 @@ export const analyticsRoute = appWithBatch
     return c.json({ data: result });
   })
 
-  .get('/:siteId/stats/main', requireAuth, validate('query', periodQuery), async c => {
+  .get('/:siteId/stats/main', authOrPublic, validate('query', periodQuery), async c => {
     const userId = c.get('userId')!;
     const siteId = c.req.param('siteId');
     const query = c.req.valid('query');
@@ -1128,7 +1152,7 @@ export const analyticsRoute = appWithBatch
     return c.json({ data: assembleMainStats(statRows, sessionRows, engagementRows) });
   })
 
-  .get('/:siteId/stats/timeseries', requireAuth, validate('query', periodQuery), async c => {
+  .get('/:siteId/stats/timeseries', authOrPublic, validate('query', periodQuery), async c => {
     const userId = c.get('userId')!;
     const siteId = c.req.param('siteId');
     const query = c.req.valid('query');
@@ -1177,7 +1201,7 @@ export const analyticsRoute = appWithBatch
     });
   })
 
-  .get('/:siteId/stats/pages', requireAuth, validate('query', pagesQuery), async c => {
+  .get('/:siteId/stats/pages', authOrPublic, validate('query', pagesQuery), async c => {
     const userId = c.get('userId')!;
     const siteId = c.req.param('siteId');
     const query = c.req.valid('query');
@@ -1303,7 +1327,7 @@ export const analyticsRoute = appWithBatch
     });
   })
 
-  .get('/:siteId/stats/referrers', requireAuth, validate('query', periodQuery), async c => {
+  .get('/:siteId/stats/referrers', authOrPublic, validate('query', periodQuery), async c => {
     const userId = c.get('userId')!;
     const siteId = c.req.param('siteId');
     const query = c.req.valid('query');
@@ -1345,7 +1369,7 @@ export const analyticsRoute = appWithBatch
   // AI assistants as a traffic channel: visits referred by ChatGPT, Claude,
   // Perplexity and friends, grouped by assistant (classified from
   // referrer_hostname at query time - see shared/src/ai-sources.ts).
-  .get('/:siteId/stats/ai-sources', requireAuth, validate('query', periodQuery), async c => {
+  .get('/:siteId/stats/ai-sources', authOrPublic, validate('query', periodQuery), async c => {
     const userId = c.get('userId')!;
     const siteId = c.req.param('siteId');
     const query = c.req.valid('query');
@@ -1383,7 +1407,7 @@ export const analyticsRoute = appWithBatch
     });
   })
 
-  .get('/:siteId/stats/utm', requireAuth, validate('query', utmQuery), async c => {
+  .get('/:siteId/stats/utm', authOrPublic, validate('query', utmQuery), async c => {
     const userId = c.get('userId')!;
     const siteId = c.req.param('siteId');
     const query = c.req.valid('query');
@@ -1430,7 +1454,7 @@ export const analyticsRoute = appWithBatch
     });
   })
 
-  .get('/:siteId/stats/locations', requireAuth, validate('query', locationQuery), async c => {
+  .get('/:siteId/stats/locations', authOrPublic, validate('query', locationQuery), async c => {
     const userId = c.get('userId')!;
     const siteId = c.req.param('siteId');
     const query = c.req.valid('query');
@@ -1481,7 +1505,7 @@ export const analyticsRoute = appWithBatch
     });
   })
 
-  .get('/:siteId/stats/devices', requireAuth, validate('query', deviceQuery), async c => {
+  .get('/:siteId/stats/devices', authOrPublic, validate('query', deviceQuery), async c => {
     const userId = c.get('userId')!;
     const siteId = c.req.param('siteId');
     const query = c.req.valid('query');
@@ -1528,7 +1552,7 @@ export const analyticsRoute = appWithBatch
     });
   })
 
-  .get('/:siteId/stats/goals', requireAuth, validate('query', periodQuery), async c => {
+  .get('/:siteId/stats/goals', authOrPublic, validate('query', periodQuery), async c => {
     const userId = c.get('userId')!;
     const siteId = c.req.param('siteId');
     const query = c.req.valid('query');
@@ -1671,7 +1695,7 @@ export const analyticsRoute = appWithBatch
   // Funnel completion stats. Always answered from R2 SQL - funnels need
   // cross-event ordering per session, which the live DO doesn't track - so
   // 'today' numbers trail ingest by the sink roll interval (~1 min).
-  .get('/:siteId/stats/funnel/:funnelId', requireAuth, validate('query', periodQuery), async c => {
+  .get('/:siteId/stats/funnel/:funnelId', authOrPublic, validate('query', periodQuery), async c => {
     const userId = c.get('userId')!;
     const siteId = c.req.param('siteId');
     const funnelId = c.req.param('funnelId');
@@ -1814,7 +1838,7 @@ export const analyticsRoute = appWithBatch
     return stub.fetch(new Request(target, c.req.raw));
   })
 
-  .get('/:siteId/stats/events', requireAuth, validate('query', periodQuery), async c => {
+  .get('/:siteId/stats/events', authOrPublic, validate('query', periodQuery), async c => {
     const userId = c.get('userId')!;
     const siteId = c.req.param('siteId');
     const query = c.req.valid('query');
@@ -1957,7 +1981,7 @@ export const analyticsRoute = appWithBatch
     });
   })
 
-  .get('/:siteId/stats/event-props', requireAuth, validate('query', eventPropsQuery), async c => {
+  .get('/:siteId/stats/event-props', authOrPublic, validate('query', eventPropsQuery), async c => {
     const userId = c.get('userId')!;
     const siteId = c.req.param('siteId');
     const query = c.req.valid('query');

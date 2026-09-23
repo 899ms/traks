@@ -16,6 +16,7 @@ import {
   BookmarkPlus,
   Globe,
   MoreHorizontal,
+  Share2,
 } from 'lucide-react';
 import type {
   Period,
@@ -24,6 +25,7 @@ import type {
   FunnelStat,
   SegmentDef,
   SegmentFilters,
+  PublicSiteInfo,
 } from '@traks/shared';
 import { INSTALL_GUIDES, findInstallGuide, guideWithSnippet, trackerSnippet } from '@traks/shared';
 import { cn, formatNumber, formatDuration, formatPercentChange } from '@/lib/utils';
@@ -64,9 +66,12 @@ import { FunnelsDrawer } from '@/components/analytics/FunnelsDrawer';
 import { FunnelsPanel } from '@/components/analytics/FunnelsPanel';
 import { PeriodPicker } from '@/components/layout/PeriodPicker';
 import { api, type AnalyticsFilters } from '@/lib/api';
+import { publicStatsApi, type StatsApi } from '@/lib/publicApi';
+import type { SiteSearch } from './portal.site.$siteId';
 import { FieldError } from '@/components/ui/field-error';
 import { domainInputError, normalizeDomain, requiredTextError } from '@traks/shared';
 import { useCollectUrl } from '@/lib/config';
+import { ShareDialog } from '@/components/sites/ShareDialog';
 
 // Auto-poll only 'today' - it's served live from the site's Durable Object
 // (millisecond queries, zero ingest delay), so a 15s poll gives a live feel
@@ -932,6 +937,30 @@ function SegmentsMenu({
 function SiteAnalyticsPage(): ReactElement {
   const { siteId } = Route.useParams();
   const search = Route.useSearch();
+  return <SiteDashboard siteId={siteId} search={search} />;
+}
+
+/**
+ * The site dashboard. Signed in, it is the full dashboard with management
+ * for owners. Given `shared` (a public site's info) it is the read-only share
+ * page: stats come from the public API, and management, the live view,
+ * segments and any section the owner didn't share are left out.
+ */
+export function SiteDashboard({
+  siteId,
+  search,
+  shared,
+}: {
+  siteId: string;
+  search: SiteSearch;
+  shared?: PublicSiteInfo;
+}): ReactElement {
+  const statsApi: StatsApi = shared ? publicStatsApi : api;
+  // URL state lives on whichever route is showing the dashboard.
+  const basePath = shared ? '/share/$siteId' : '/portal/site/$siteId';
+  const sharesGoals = !shared || shared.sections.goals;
+  const sharesFunnels = !shared || shared.sections.funnels;
+  const sharesEvents = !shared || shared.sections.events;
   const { period: searchPeriod } = search;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -948,25 +977,25 @@ function SiteAnalyticsPage(): ReactElement {
   const setPeriod = useCallback(
     (p: Period) => {
       navigate({
-        to: '/portal/site/$siteId',
+        to: basePath,
         params: { siteId },
         search: prev => ({ ...prev, period: p }),
         replace: true,
       });
     },
-    [navigate, siteId]
+    [navigate, siteId, basePath]
   );
 
   const setFilter = useCallback(
     (key: keyof AnalyticsFilters, value: string) => {
       navigate({
-        to: '/portal/site/$siteId',
+        to: basePath,
         params: { siteId },
         search: prev => ({ ...prev, [key]: value }),
         replace: true,
       });
     },
-    [navigate, siteId]
+    [navigate, siteId, basePath]
   );
 
   // Live view -> dashboard: replace the whole filter set (keys the live view
@@ -975,7 +1004,7 @@ function SiteAnalyticsPage(): ReactElement {
     (next: AnalyticsFilters) => {
       const keys = Object.keys(FILTER_LABELS) as (keyof AnalyticsFilters)[];
       navigate({
-        to: '/portal/site/$siteId',
+        to: basePath,
         params: { siteId },
         search: prev => ({
           ...prev,
@@ -984,24 +1013,24 @@ function SiteAnalyticsPage(): ReactElement {
         replace: true,
       });
     },
-    [navigate, siteId]
+    [navigate, siteId, basePath]
   );
 
   const removeFilter = useCallback(
     (key: keyof AnalyticsFilters) => {
       navigate({
-        to: '/portal/site/$siteId',
+        to: basePath,
         params: { siteId },
         search: prev => ({ ...prev, [key]: undefined }),
         replace: true,
       });
     },
-    [navigate, siteId]
+    [navigate, siteId, basePath]
   );
 
   const clearFilters = useCallback(() => {
     navigate({
-      to: '/portal/site/$siteId',
+      to: basePath,
       params: { siteId },
       search: prev => {
         const next = { ...prev } as Record<string, unknown>;
@@ -1010,13 +1039,13 @@ function SiteAnalyticsPage(): ReactElement {
       },
       replace: true,
     });
-  }, [navigate, siteId]);
+  }, [navigate, siteId, basePath]);
 
   // Replace the active filters wholesale with a saved segment's set.
   const applySegment = useCallback(
     (segmentFilters: SegmentFilters) => {
       navigate({
-        to: '/portal/site/$siteId',
+        to: basePath,
         params: { siteId },
         search: prev => {
           const next = { ...prev } as Record<string, unknown>;
@@ -1028,12 +1057,13 @@ function SiteAnalyticsPage(): ReactElement {
         replace: true,
       });
     },
-    [navigate, siteId]
+    [navigate, siteId, basePath]
   );
   const [refreshing, setRefreshing] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [installOpen, setInstallOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [goalsOpen, setGoalsOpen] = useState(false);
   // Add/edit goal form: null = closed, { goal: null } = add (optionally
   // prefilled from `draft`, e.g. a duplicate), { goal } = edit.
@@ -1078,7 +1108,7 @@ function SiteAnalyticsPage(): ReactElement {
   // Live visitors (last 5 min): pushed from the site's DO over a WebSocket,
   // polled every 30s while the socket is down. Declared before handleRefresh,
   // which needs the connection status.
-  const realtime = useRealtime(siteId);
+  const realtime = useRealtime(siteId, undefined, !shared);
 
   const handleRefresh = useCallback(async (): Promise<void> => {
     setRefreshing(true);
@@ -1102,6 +1132,8 @@ function SiteAnalyticsPage(): ReactElement {
       return api.getSite(siteId);
     },
     staleTime: 300_000,
+    // A share page already has the site's public identity.
+    enabled: !shared,
   });
 
   // One request for the whole default view. /stats/all answers main,
@@ -1112,7 +1144,7 @@ function SiteAnalyticsPage(): ReactElement {
   const useBootstrap = !hasFilters;
   const bootstrapQ = useQuery({
     queryKey: ['site-analytics', siteId, 'all', period],
-    queryFn: async () => api.getAllStats(siteId, period),
+    queryFn: async () => statsApi.getAllStats(siteId, period),
     enabled: useBootstrap,
     refetchInterval: getRefetchInterval(period),
     staleTime: getStaleTime(period),
@@ -1186,10 +1218,10 @@ function SiteAnalyticsPage(): ReactElement {
     if (period !== 'today' || hasFilters || !bootstrapSettled) return;
     void queryClient.prefetchQuery({
       queryKey: ['site-analytics', siteId, 'all', 'yesterday'],
-      queryFn: async () => api.getAllStats(siteId, 'yesterday'),
+      queryFn: async () => statsApi.getAllStats(siteId, 'yesterday'),
       staleTime: getStaleTime('yesterday'),
     });
-  }, [queryClient, siteId, period, hasFilters, bootstrapSettled]);
+  }, [queryClient, siteId, period, hasFilters, bootstrapSettled, statsApi]);
 
   // Per-tile parallel queries - each tile renders as its own request resolves.
   // Tabbed panels pass `enabled` so only the active tab's query runs (each
@@ -1226,10 +1258,10 @@ function SiteAnalyticsPage(): ReactElement {
   });
 
   const mainQ = useQuery(
-    tileOpts(['main'], () => api.getMainStats(siteId, period, filters), true, true)
+    tileOpts(['main'], () => statsApi.getMainStats(siteId, period, filters), true, true)
   );
   const timeseriesQ = useQuery(
-    tileOpts(['timeseries'], () => api.getTimeseries(siteId, period, filters), true, true)
+    tileOpts(['timeseries'], () => statsApi.getTimeseries(siteId, period, filters), true, true)
   );
 
   // keepPreviousData means a period or filter switch leaves the previous
@@ -1243,7 +1275,7 @@ function SiteAnalyticsPage(): ReactElement {
   const topPagesQ = useQuery(
     tileOpts(
       ['pages', 'top'],
-      () => api.getTopPages(siteId, period, 'top', filters),
+      () => statsApi.getTopPages(siteId, period, 'top', filters),
       pagesTab === 'top',
       true
     )
@@ -1251,14 +1283,14 @@ function SiteAnalyticsPage(): ReactElement {
   const entryPagesQ = useQuery(
     tileOpts(
       ['pages', 'entry'],
-      () => api.getTopPages(siteId, period, 'entry', filters),
+      () => statsApi.getTopPages(siteId, period, 'entry', filters),
       pagesTab === 'entry'
     )
   );
   const exitPagesQ = useQuery(
     tileOpts(
       ['pages', 'exit'],
-      () => api.getTopPages(siteId, period, 'exit', filters),
+      () => statsApi.getTopPages(siteId, period, 'exit', filters),
       pagesTab === 'exit'
     )
   );
@@ -1267,7 +1299,7 @@ function SiteAnalyticsPage(): ReactElement {
   const referrersQ = useQuery(
     tileOpts(
       ['referrers'],
-      () => api.getTopReferrers(siteId, period, filters),
+      () => statsApi.getTopReferrers(siteId, period, filters),
       sourceTab === 'referrers',
       true
     )
@@ -1275,33 +1307,37 @@ function SiteAnalyticsPage(): ReactElement {
   const utmSourceQ = useQuery(
     tileOpts(
       ['utm', 'source'],
-      () => api.getUtm(siteId, period, 'source', filters),
+      () => statsApi.getUtm(siteId, period, 'source', filters),
       sourceTab === 'utm_source'
     )
   );
   const utmMediumQ = useQuery(
     tileOpts(
       ['utm', 'medium'],
-      () => api.getUtm(siteId, period, 'medium', filters),
+      () => statsApi.getUtm(siteId, period, 'medium', filters),
       sourceTab === 'utm_medium'
     )
   );
   const utmCampaignQ = useQuery(
     tileOpts(
       ['utm', 'campaign'],
-      () => api.getUtm(siteId, period, 'campaign', filters),
+      () => statsApi.getUtm(siteId, period, 'campaign', filters),
       sourceTab === 'utm_campaign'
     )
   );
   const aiSourcesQ = useQuery(
-    tileOpts(['ai-sources'], () => api.getAiSources(siteId, period, filters), sourceTab === 'ai')
+    tileOpts(
+      ['ai-sources'],
+      () => statsApi.getAiSources(siteId, period, filters),
+      sourceTab === 'ai'
+    )
   );
 
   // Below-fold panels
   const countriesQ = useQuery(
     tileOpts(
       ['locations', 'country'],
-      () => api.getLocations(siteId, period, 'country', filters),
+      () => statsApi.getLocations(siteId, period, 'country', filters),
       belowFoldVisible && locationTab === 'country',
       true
     )
@@ -1309,21 +1345,21 @@ function SiteAnalyticsPage(): ReactElement {
   const regionsQ = useQuery(
     tileOpts(
       ['locations', 'region'],
-      () => api.getLocations(siteId, period, 'region', filters),
+      () => statsApi.getLocations(siteId, period, 'region', filters),
       belowFoldVisible && locationTab === 'region'
     )
   );
   const citiesQ = useQuery(
     tileOpts(
       ['locations', 'city'],
-      () => api.getLocations(siteId, period, 'city', filters),
+      () => statsApi.getLocations(siteId, period, 'city', filters),
       belowFoldVisible && locationTab === 'city'
     )
   );
   const browsersQ = useQuery(
     tileOpts(
       ['devices', 'browser'],
-      () => api.getDevices(siteId, period, 'browser', filters),
+      () => statsApi.getDevices(siteId, period, 'browser', filters),
       belowFoldVisible && deviceTab === 'browser',
       true
     )
@@ -1331,49 +1367,61 @@ function SiteAnalyticsPage(): ReactElement {
   const osQ = useQuery(
     tileOpts(
       ['devices', 'os'],
-      () => api.getDevices(siteId, period, 'os', filters),
+      () => statsApi.getDevices(siteId, period, 'os', filters),
       belowFoldVisible && deviceTab === 'os'
     )
   );
   const deviceTypeQ = useQuery(
     tileOpts(
       ['devices', 'device'],
-      () => api.getDevices(siteId, period, 'device', filters),
+      () => statsApi.getDevices(siteId, period, 'device', filters),
       belowFoldVisible && deviceTab === 'device'
     )
   );
   const screenSizeQ = useQuery(
     tileOpts(
       ['devices', 'size'],
-      () => api.getDevices(siteId, period, 'size', filters),
+      () => statsApi.getDevices(siteId, period, 'size', filters),
       belowFoldVisible && deviceTab === 'size'
     )
   );
   const eventsQ = useQuery(
-    tileOpts(['events'], () => api.getEvents(siteId, period, filters), belowFoldVisible)
+    tileOpts(
+      ['events'],
+      () => statsApi.getEvents(siteId, period, filters),
+      belowFoldVisible && sharesEvents
+    )
   );
   const botsQ = useQuery(
-    tileOpts(['bots'], () => api.getBots(siteId, period, filters), belowFoldVisible)
+    tileOpts(['bots'], () => statsApi.getBots(siteId, period, filters), belowFoldVisible && !shared)
   );
   const webmcpQ = useQuery(
-    tileOpts(['webmcp'], () => api.getWebmcp(siteId, period, filters), belowFoldVisible)
+    tileOpts(
+      ['webmcp'],
+      () => statsApi.getWebmcp(siteId, period, filters),
+      belowFoldVisible && !shared
+    )
   );
   const outboundQ = useQuery(
     tileOpts(
       ['links', 'outbound'],
-      () => api.getLinks(siteId, period, 'outbound', filters),
-      belowFoldVisible && linkTab === 'outbound'
+      () => statsApi.getLinks(siteId, period, 'outbound', filters),
+      belowFoldVisible && !shared && linkTab === 'outbound'
     )
   );
   const downloadsQ = useQuery(
     tileOpts(
       ['links', 'download'],
-      () => api.getLinks(siteId, period, 'download', filters),
-      belowFoldVisible && linkTab === 'download'
+      () => statsApi.getLinks(siteId, period, 'download', filters),
+      belowFoldVisible && !shared && linkTab === 'download'
     )
   );
   const goalStatsQ = useQuery(
-    tileOpts(['goals'], () => api.getGoalStats(siteId, period, filters), belowFoldVisible)
+    tileOpts(
+      ['goals'],
+      () => statsApi.getGoalStats(siteId, period, filters),
+      belowFoldVisible && sharesGoals
+    )
   );
 
   // Funnel definitions live in D1 (cheap); stats are one R2 SQL scan per funnel,
@@ -1384,9 +1432,12 @@ function SiteAnalyticsPage(): ReactElement {
       return api.getFunnels(siteId);
     },
     staleTime: 60_000,
-    enabled: belowFoldVisible,
+    // A share page gets its (shared) funnel list with the site info.
+    enabled: belowFoldVisible && !shared,
   });
-  const funnelList = ((funnelsQ.data as any)?.data ?? []) as FunnelDef[];
+  const funnelList = shared
+    ? (shared.funnels ?? [])
+    : (((funnelsQ.data as any)?.data ?? []) as FunnelDef[]);
   const activeFunnelId =
     selectedFunnelId && funnelList.some(f => f.id === selectedFunnelId)
       ? selectedFunnelId
@@ -1394,8 +1445,8 @@ function SiteAnalyticsPage(): ReactElement {
   const funnelStatsQ = useQuery(
     tileOpts(
       ['funnel', activeFunnelId],
-      () => api.getFunnelStats(siteId, activeFunnelId!, period, filters),
-      belowFoldVisible && activeFunnelId !== null,
+      () => statsApi.getFunnelStats(siteId, activeFunnelId!, period, filters),
+      belowFoldVisible && sharesFunnels && activeFunnelId !== null,
       false,
       false
     )
@@ -1403,7 +1454,7 @@ function SiteAnalyticsPage(): ReactElement {
   const eventPropsQ = useQuery(
     tileOpts(
       ['event-props', selectedEvent],
-      () => api.getEventProps(siteId, period, selectedEvent!, filters),
+      () => statsApi.getEventProps(siteId, period, selectedEvent!, filters),
       belowFoldVisible && selectedEvent !== null,
       false,
       false
@@ -1412,7 +1463,15 @@ function SiteAnalyticsPage(): ReactElement {
 
   const [liveOpen, setLiveOpen] = useState(false);
 
-  const site = (siteData as any)?.data;
+  const site = shared
+    ? {
+        name: shared.name,
+        domain: shared.domain,
+        favicon: shared.favicon,
+        timezone: shared.timezone,
+        role: 'member' as const,
+      }
+    : (siteData as any)?.data;
   // Members are view-only: manage affordances render only once the site has
   // loaded with an owner role (server enforces regardless).
   const canManage = !!site && site.role !== 'member';
@@ -1505,12 +1564,14 @@ function SiteAnalyticsPage(): ReactElement {
             column so panels slide cleanly beneath it. */}
         <div className="sticky top-14 z-30 -mx-4 flex flex-wrap items-center justify-between gap-3 bg-[#F9F8F6] px-4 py-3 sm:-mx-6 sm:px-6">
           <div className="flex items-center gap-3">
-            <Link
-              to="/portal/sites"
-              className="flex h-8 w-8 items-center justify-center rounded-full text-[#B5B0AA] transition-all hover:bg-white hover:text-[#3D3B4F] cursor-pointer"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </Link>
+            {!shared && (
+              <Link
+                to="/portal/sites"
+                className="flex h-8 w-8 items-center justify-center rounded-full text-[#B5B0AA] transition-all hover:bg-white hover:text-[#3D3B4F] cursor-pointer"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </Link>
+            )}
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[13px] bg-[#F2F1ED]">
               {site?.favicon ? (
                 <img
@@ -1529,14 +1590,21 @@ function SiteAnalyticsPage(): ReactElement {
               </h1>
               <div className="mt-1 flex items-center gap-2.5 text-[12.5px]">
                 {site?.domain && <span className="text-[#9B9590]">{site.domain}</span>}
-                {site?.domain && currentVisitors !== null && (
+                {!shared && site?.public && (
+                  <span className="rounded-[6px] bg-[#28E99F]/20 px-1.5 py-0.5 text-[11px] font-medium text-[#3D3B4F]">
+                    Public
+                  </span>
+                )}
+                {!shared && site?.domain && currentVisitors !== null && (
                   <span className="h-[3px] w-[3px] rounded-full bg-[#D8D2CA]" />
                 )}
-                <LivePill
-                  count={currentVisitors}
-                  status={realtime.status}
-                  onClick={() => setLiveOpen(true)}
-                />
+                {!shared && (
+                  <LivePill
+                    count={currentVisitors}
+                    status={realtime.status}
+                    onClick={() => setLiveOpen(true)}
+                  />
+                )}
               </div>
             </div>
           </div>
@@ -1544,15 +1612,33 @@ function SiteAnalyticsPage(): ReactElement {
             {/* Actions fused into one segmented cluster; Delete lives in the
                 overflow so it never sits one slip away from Refresh. */}
             <div className="flex items-center gap-0.5 rounded-full border border-[#E6E4DE] bg-white p-0.5">
-              <button onClick={() => setInstallOpen(true)} className={SEG_BTN} title="Installation">
-                <Code2 className="w-[15px] h-[15px]" />
-              </button>
-              <SegmentsMenu
-                siteId={siteId}
-                filters={filters}
-                hasFilters={hasFilters}
-                onApply={applySegment}
-              />
+              {!shared && (
+                <>
+                  <button
+                    onClick={() => setInstallOpen(true)}
+                    className={SEG_BTN}
+                    title="Installation"
+                  >
+                    <Code2 className="w-[15px] h-[15px]" />
+                  </button>
+                  <SegmentsMenu
+                    siteId={siteId}
+                    filters={filters}
+                    hasFilters={hasFilters}
+                    onApply={applySegment}
+                  />
+                </>
+              )}
+              {canManage && (
+                <IconTip label={site?.public ? 'Shared publicly' : 'Share'}>
+                  <button
+                    onClick={() => setShareOpen(true)}
+                    className={cn(SEG_BTN, site?.public && 'text-[#1FC285]')}
+                  >
+                    <Share2 className="w-[15px] h-[15px]" />
+                  </button>
+                </IconTip>
+              )}
               {canManage && (
                 <IconTip label="Site settings">
                   <button onClick={() => setEditOpen(true)} className={SEG_BTN}>
@@ -1595,14 +1681,16 @@ function SiteAnalyticsPage(): ReactElement {
           </div>
         </div>
 
-        <LiveModal
-          open={liveOpen}
-          onOpenChange={setLiveOpen}
-          siteId={siteId}
-          domain={site?.domain}
-          dashboardFilters={filters}
-          onApply={applyLiveFilters}
-        />
+        {!shared && (
+          <LiveModal
+            open={liveOpen}
+            onOpenChange={setLiveOpen}
+            siteId={siteId}
+            domain={site?.domain}
+            dashboardFilters={filters}
+            onApply={applyLiveFilters}
+          />
+        )}
 
         {/* Active filters */}
         {hasFilters && (
@@ -1761,207 +1849,241 @@ function SiteAnalyticsPage(): ReactElement {
               {/* Custom events beside auto-tracked links: events are
                 business actions with a props drill-down; outbound/downloads
                 share one card as tabs since they're the same shape (URL +
-                clicks). */}
-              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                {selectedEvent === null ? (
-                  <PanelCard
-                    title="Custom Events"
-                    labelHeader="Event"
-                    valueHeader="Count"
-                    items={events?.map(e => ({ name: e.name, visitors: e.count }))}
-                    isLoading={eventsQ.isLoading}
-                    isError={eventsQ.isError}
-                    emptyText="No custom events yet"
-                    onItemClick={item => setSelectedEvent(item.name)}
-                  />
-                ) : (
-                  <PanelCard
-                    title={selectedEvent}
-                    labelHeader="Property"
-                    valueHeader="Events"
-                    items={(
-                      (eventPropsQ.data as any)?.data as
-                        | { key: string; value: string; events: number }[]
-                        | undefined
-                    )?.map(p => ({
-                      name: `${p.key}: ${p.value}`,
-                      visitors: p.events,
-                    }))}
-                    isLoading={eventPropsQ.isLoading}
-                    isError={eventPropsQ.isError}
-                    emptyText="No properties on this event"
-                    headerAction={
-                      <button
-                        onClick={() => setSelectedEvent(null)}
-                        className="ml-auto shrink-0 rounded-full bg-muted px-3 py-1 text-[11px] font-semibold text-foreground hover:bg-muted transition-colors cursor-pointer"
-                      >
-                        ← All events
-                      </button>
-                    }
-                  />
-                )}
-                <PanelCard
-                  title="Links"
-                  labelHeader="URL"
-                  items={(linkQ.data as any)?.data}
-                  isLoading={linkQ.isLoading}
-                  isError={linkQ.isError}
-                  tabs={LINK_TABS}
-                  activeTab={linkTab}
-                  onTabChange={setLinkTab}
-                  emptyText={
-                    linkTab === 'outbound' ? 'No outbound clicks yet' : 'No file downloads yet'
-                  }
-                />
-              </div>
+                clicks). A share page shows events only if the owner shared
+                them, and never links. */}
+              {sharesEvents && (
+                <div className={shared ? undefined : 'grid grid-cols-1 gap-6 lg:grid-cols-2'}>
+                  {selectedEvent === null ? (
+                    <PanelCard
+                      title="Custom Events"
+                      labelHeader="Event"
+                      valueHeader="Count"
+                      items={events?.map(e => ({ name: e.name, visitors: e.count }))}
+                      isLoading={eventsQ.isLoading}
+                      isError={eventsQ.isError}
+                      emptyText="No custom events yet"
+                      onItemClick={item => setSelectedEvent(item.name)}
+                    />
+                  ) : (
+                    <PanelCard
+                      title={selectedEvent}
+                      labelHeader="Property"
+                      valueHeader="Events"
+                      items={(
+                        (eventPropsQ.data as any)?.data as
+                          | { key: string; value: string; events: number }[]
+                          | undefined
+                      )?.map(p => ({
+                        name: `${p.key}: ${p.value}`,
+                        visitors: p.events,
+                      }))}
+                      isLoading={eventPropsQ.isLoading}
+                      isError={eventPropsQ.isError}
+                      emptyText="No properties on this event"
+                      headerAction={
+                        <button
+                          onClick={() => setSelectedEvent(null)}
+                          className="ml-auto shrink-0 rounded-full bg-muted px-3 py-1 text-[11px] font-semibold text-foreground hover:bg-muted transition-colors cursor-pointer"
+                        >
+                          ← All events
+                        </button>
+                      }
+                    />
+                  )}
+                  {!shared && (
+                    <PanelCard
+                      title="Links"
+                      labelHeader="URL"
+                      items={(linkQ.data as any)?.data}
+                      isLoading={linkQ.isLoading}
+                      isError={linkQ.isError}
+                      tabs={LINK_TABS}
+                      activeTab={linkTab}
+                      onTabChange={setLinkTab}
+                      emptyText={
+                        linkTab === 'outbound' ? 'No outbound clicks yet' : 'No file downloads yet'
+                      }
+                    />
+                  )}
+                </div>
+              )}
 
-              {/* WebMCP tool calls: agent invocations of tools the page exposes
+              {/* Agent tools and bots are never part of a share page. */}
+              {!shared && (
+                <>
+                  {/* WebMCP tool calls: agent invocations of tools the page exposes
                 via document.modelContext, auto-tracked by the tracker's
                 registerTool wrapper as reserved custom events. Rows that had
                 failures show the error count next to the tool name. */}
-              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                <PanelCard
-                  title="Agent Tools (WebMCP)"
-                  labelHeader="Tool"
-                  valueHeader="Calls"
-                  items={(
-                    (webmcpQ.data as any)?.data as
-                      | { name: string; calls: number; errors: number; avgMs: number }[]
-                      | undefined
-                  )?.map(t => ({
-                    name: t.errors > 0 ? `${t.name} · ${t.errors} failed` : t.name,
-                    visitors: t.calls,
-                  }))}
-                  isLoading={webmcpQ.isLoading}
-                  isError={webmcpQ.isError}
-                  emptyText="No agent tool calls yet"
-                />
+                  <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                    <PanelCard
+                      title="Agent Tools (WebMCP)"
+                      labelHeader="Tool"
+                      valueHeader="Calls"
+                      items={(
+                        (webmcpQ.data as any)?.data as
+                          | { name: string; calls: number; errors: number; avgMs: number }[]
+                          | undefined
+                      )?.map(t => ({
+                        name: t.errors > 0 ? `${t.name} · ${t.errors} failed` : t.name,
+                        visitors: t.calls,
+                      }))}
+                      isLoading={webmcpQ.isLoading}
+                      isError={webmcpQ.isError}
+                      emptyText="No agent tool calls yet"
+                    />
 
-                {/* Bot traffic: counted at ingest under its own event type, so
+                    {/* Bot traffic: counted at ingest under its own event type, so
                 it never touches the human metrics above. Value shown is
                 distinct visitors per bot (crawlers, AI agents, monitors). */}
-                <PanelCard
-                  title="Bots"
-                  labelHeader="Bot"
-                  valueHeader="Visitors"
-                  items={(
-                    (botsQ.data as any)?.data as
-                      | { name: string; visitors: number; pageviews: number }[]
-                      | undefined
-                  )?.map(b => ({ name: b.name, visitors: b.visitors }))}
-                  isLoading={botsQ.isLoading}
-                  isError={botsQ.isError}
-                  emptyText="No bot visits yet"
-                />
-              </div>
+                    <PanelCard
+                      title="Bots"
+                      labelHeader="Bot"
+                      valueHeader="Visitors"
+                      items={(
+                        (botsQ.data as any)?.data as
+                          | { name: string; visitors: number; pageviews: number }[]
+                          | undefined
+                      )?.map(b => ({ name: b.name, visitors: b.visitors }))}
+                      isLoading={botsQ.isLoading}
+                      isError={botsQ.isError}
+                      emptyText="No bot visits yet"
+                    />
+                  </div>
+                </>
+              )}
 
-              {/* Goals, then funnels, close out the page */}
-              <GoalsPanel
-                siteId={siteId}
-                goals={(goalStatsQ.data as any)?.data}
-                isLoading={goalStatsQ.isLoading}
-                isError={goalStatsQ.isError}
-                onAdd={canManage ? () => setGoalForm({ goal: null }) : undefined}
-                onEdit={canManage ? goal => setGoalForm({ goal }) : undefined}
-                onDuplicate={canManage ? duplicateGoal : undefined}
-                onManage={canManage ? () => setGoalsOpen(true) : undefined}
-              />
+              {/* Goals, then funnels, close out the page (on a share page, only
+                if the owner shared them). */}
+              {sharesGoals && (
+                <GoalsPanel
+                  siteId={siteId}
+                  goals={(goalStatsQ.data as any)?.data}
+                  isLoading={goalStatsQ.isLoading}
+                  isError={goalStatsQ.isError}
+                  onAdd={canManage ? () => setGoalForm({ goal: null }) : undefined}
+                  onEdit={canManage ? goal => setGoalForm({ goal }) : undefined}
+                  onDuplicate={canManage ? duplicateGoal : undefined}
+                  onManage={canManage ? () => setGoalsOpen(true) : undefined}
+                />
+              )}
 
               {/* Funnels */}
-              <FunnelsPanel
-                siteId={siteId}
-                funnels={funnelsQ.isLoading ? undefined : funnelList}
-                selectedId={activeFunnelId}
-                onSelect={setSelectedFunnelId}
-                stat={(funnelStatsQ.data as any)?.data as FunnelStat | undefined}
-                isLoading={funnelStatsQ.isLoading}
-                isError={funnelStatsQ.isError || funnelsQ.isError}
-                onAdd={canManage ? () => setFunnelForm({ funnel: null }) : undefined}
-                onEdit={canManage ? funnel => setFunnelForm({ funnel }) : undefined}
-                onDuplicate={canManage ? duplicateFunnel : undefined}
-                onManage={canManage ? () => setFunnelsOpen(true) : undefined}
-              />
+              {sharesFunnels && (
+                <FunnelsPanel
+                  siteId={siteId}
+                  funnels={funnelsQ.isLoading ? undefined : funnelList}
+                  selectedId={activeFunnelId}
+                  onSelect={setSelectedFunnelId}
+                  stat={(funnelStatsQ.data as any)?.data as FunnelStat | undefined}
+                  isLoading={funnelStatsQ.isLoading}
+                  isError={funnelStatsQ.isError || funnelsQ.isError}
+                  onAdd={canManage ? () => setFunnelForm({ funnel: null }) : undefined}
+                  onEdit={canManage ? funnel => setFunnelForm({ funnel }) : undefined}
+                  onDuplicate={canManage ? duplicateFunnel : undefined}
+                  onManage={canManage ? () => setFunnelsOpen(true) : undefined}
+                />
+              )}
             </>
           )}
         </div>
       </div>
 
-      <EditSiteModal
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        site={site ? { name: site.name, domain: site.domain, timezone: site.timezone } : null}
-        siteId={siteId}
-      />
+      {/* Management dialogs: never on a share page. */}
+      {!shared && (
+        <>
+          {site && canManage && (
+            <ShareDialog
+              open={shareOpen}
+              onOpenChange={setShareOpen}
+              siteId={siteId}
+              siteName={site.name}
+              sharing={{
+                public: Boolean(site.public),
+                publicGoals: Boolean(site.publicGoals),
+                publicFunnels: Boolean(site.publicFunnels),
+                publicEvents: Boolean(site.publicEvents),
+              }}
+            />
+          )}
+          <EditSiteModal
+            open={editOpen}
+            onOpenChange={setEditOpen}
+            site={site ? { name: site.name, domain: site.domain, timezone: site.timezone } : null}
+            siteId={siteId}
+          />
 
-      <InstallModal open={installOpen} onOpenChange={setInstallOpen} site={site} />
+          <InstallModal open={installOpen} onOpenChange={setInstallOpen} site={site} />
 
-      <GoalsDrawer
-        open={goalsOpen}
-        onOpenChange={setGoalsOpen}
-        siteId={siteId}
-        siteLabel={site?.domain}
-        stats={(goalStatsQ.data as any)?.data}
-        periodLabel={PERIOD_LABELS[period] ?? period}
-        onAdd={() => {
-          setGoalsOpen(false);
-          setGoalForm({ goal: null });
-        }}
-        onEdit={goal => {
-          setGoalsOpen(false);
-          setGoalForm({ goal });
-        }}
-        onDuplicate={duplicateGoal}
-      />
+          <GoalsDrawer
+            open={goalsOpen}
+            onOpenChange={setGoalsOpen}
+            siteId={siteId}
+            siteLabel={site?.domain}
+            stats={(goalStatsQ.data as any)?.data}
+            periodLabel={PERIOD_LABELS[period] ?? period}
+            onAdd={() => {
+              setGoalsOpen(false);
+              setGoalForm({ goal: null });
+            }}
+            onEdit={goal => {
+              setGoalsOpen(false);
+              setGoalForm({ goal });
+            }}
+            onDuplicate={duplicateGoal}
+          />
 
-      <GoalFormModal
-        open={goalForm !== null}
-        onOpenChange={openState => {
-          if (!openState) setGoalForm(null);
-        }}
-        siteId={siteId}
-        domain={site?.domain}
-        goal={goalForm?.goal ?? null}
-        draft={goalForm?.draft}
-      />
+          <GoalFormModal
+            open={goalForm !== null}
+            onOpenChange={openState => {
+              if (!openState) setGoalForm(null);
+            }}
+            siteId={siteId}
+            domain={site?.domain}
+            goal={goalForm?.goal ?? null}
+            draft={goalForm?.draft}
+          />
 
-      <FunnelsDrawer
-        open={funnelsOpen}
-        onOpenChange={setFunnelsOpen}
-        siteId={siteId}
-        siteLabel={site?.domain}
-        selectedId={activeFunnelId}
-        onAdd={() => {
-          setFunnelsOpen(false);
-          setFunnelForm({ funnel: null });
-        }}
-        onEdit={funnel => {
-          setFunnelsOpen(false);
-          setFunnelForm({ funnel });
-        }}
-        onSelect={id => {
-          setSelectedFunnelId(id);
-          setFunnelsOpen(false);
-        }}
-        onDuplicate={duplicateFunnel}
-      />
+          <FunnelsDrawer
+            open={funnelsOpen}
+            onOpenChange={setFunnelsOpen}
+            siteId={siteId}
+            siteLabel={site?.domain}
+            selectedId={activeFunnelId}
+            onAdd={() => {
+              setFunnelsOpen(false);
+              setFunnelForm({ funnel: null });
+            }}
+            onEdit={funnel => {
+              setFunnelsOpen(false);
+              setFunnelForm({ funnel });
+            }}
+            onSelect={id => {
+              setSelectedFunnelId(id);
+              setFunnelsOpen(false);
+            }}
+            onDuplicate={duplicateFunnel}
+          />
 
-      <FunnelFormModal
-        open={funnelForm !== null}
-        onOpenChange={openState => {
-          if (!openState) setFunnelForm(null);
-        }}
-        siteId={siteId}
-        domain={site?.domain}
-        funnel={funnelForm?.funnel ?? null}
-        draft={funnelForm?.draft}
-      />
+          <FunnelFormModal
+            open={funnelForm !== null}
+            onOpenChange={openState => {
+              if (!openState) setFunnelForm(null);
+            }}
+            siteId={siteId}
+            domain={site?.domain}
+            funnel={funnelForm?.funnel ?? null}
+            draft={funnelForm?.draft}
+          />
 
-      <DeleteSiteModal
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        site={site ? { name: site.name, domain: site.domain } : null}
-        siteId={siteId}
-      />
+          <DeleteSiteModal
+            open={deleteOpen}
+            onOpenChange={setDeleteOpen}
+            site={site ? { name: site.name, domain: site.domain } : null}
+            siteId={siteId}
+          />
+        </>
+      )}
     </main>
   );
 }

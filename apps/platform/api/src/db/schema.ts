@@ -163,7 +163,13 @@ export const sites = sqliteTable(
      *  change (never from the browser - no third-party favicon services). */
     favicon: text('favicon'),
     timezone: text('timezone').default('UTC').notNull(),
+    /** Public dashboard at /share/<id>. Traffic panels are always shown when
+     *  public; goals, funnels and custom events each need their own opt-in
+     *  (their names can reveal business details). */
     public: integer('public', { mode: 'boolean' }).default(false).notNull(),
+    publicGoals: integer('public_goals', { mode: 'boolean' }).default(false).notNull(),
+    publicFunnels: integer('public_funnels', { mode: 'boolean' }).default(false).notNull(),
+    publicEvents: integer('public_events', { mode: 'boolean' }).default(false).notNull(),
     createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
   },

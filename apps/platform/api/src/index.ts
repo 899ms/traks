@@ -13,6 +13,7 @@ import { workspacesRoute } from './routes/workspaces';
 import { invitationsRoute } from './routes/invitations';
 import { tokensRoute } from './routes/tokens';
 import { mcpHandler } from './routes/mcp';
+import { publicAnalyticsGate, publicRoute } from './routes/public';
 import { requireAuth, sessionOnly } from './middleware/auth';
 import { runPrewarm } from './lib/prewarm';
 
@@ -134,6 +135,14 @@ const routes = app
   .route('/api/sites', sitesRoute)
   .route('/api/analytics', analyticsRoute)
   .route('/api/tokens', tokensRoute);
+
+// Public dashboards (/share/<id>): the same analytics handlers, mounted a
+// second time behind a gate that admits only public sites, allow-listed
+// endpoints and shared sections - no session, no token. The gate is the ONLY
+// thing that sets `publicSite`; see routes/public.ts.
+app.use('/api/public/analytics/*', publicAnalyticsGate);
+app.route('/api/public/analytics', analyticsRoute);
+app.route('/api/public', publicRoute);
 
 // MCP endpoint (Streamable HTTP, stateless): registered after the routes it
 // dispatches into, closing over `app` so tool calls run in-process through

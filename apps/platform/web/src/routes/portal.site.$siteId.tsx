@@ -2,7 +2,8 @@ import { createFileRoute } from '@tanstack/react-router';
 import { PERIODS } from '@traks/shared';
 import type { Period } from '@traks/shared';
 
-type SiteSearch = {
+/** Dashboard URL state; shared with the public /share/$siteId route. */
+export type SiteSearch = {
   period?: Period;
   // Click-to-filter params (exact match), mirrored to the API's query fields.
   page?: string;
@@ -32,16 +33,18 @@ const FILTER_KEYS = [
   'device',
 ] as const;
 
+export function validateSiteSearch(search: Record<string, unknown>): SiteSearch {
+  const p = search.period as string;
+  const out: SiteSearch = {
+    period: PERIODS.includes(p as Period) ? (p as Period) : undefined,
+  };
+  for (const key of FILTER_KEYS) {
+    const value = search[key];
+    if (typeof value === 'string' && value.length > 0) out[key] = value;
+  }
+  return out;
+}
+
 export const Route = createFileRoute('/portal/site/$siteId')({
-  validateSearch: (search: Record<string, unknown>): SiteSearch => {
-    const p = search.period as string;
-    const out: SiteSearch = {
-      period: PERIODS.includes(p as Period) ? (p as Period) : undefined,
-    };
-    for (const key of FILTER_KEYS) {
-      const value = search[key];
-      if (typeof value === 'string' && value.length > 0) out[key] = value;
-    }
-    return out;
-  },
+  validateSearch: validateSiteSearch,
 });

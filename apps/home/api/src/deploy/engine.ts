@@ -647,6 +647,14 @@ export async function provisionInstance(ctx: EngineCtx): Promise<ProvisionResult
           namespace_id: '1004',
           simple: { limit: 20, period: 60 },
         },
+        // Anonymous readers of public dashboards (/api/public/*), per IP: a
+        // share link must not become a free R2 SQL query engine.
+        {
+          type: 'ratelimit',
+          name: 'PUBLIC_LIMIT',
+          namespace_id: '1005',
+          simple: { limit: 300, period: 60 },
+        },
         {
           type: 'durable_object_namespace',
           name: 'LIVE',

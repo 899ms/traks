@@ -6,6 +6,7 @@ import { createId } from '@paralleldrive/cuid2';
 import {
   createSiteSchema,
   updateSiteSchema,
+  siteSharingSchema,
   allSitesTimezoneSchema,
   createGoalSchema,
   createFunnelSchema,
@@ -254,6 +255,40 @@ export const sitesRoute = app
 
     const [updated] = await db.select().from(sites).where(eq(sites.id, siteId));
 
+    return c.json({ data: updated });
+  })
+
+  // Public dashboard switches (owners only). Partial: each call flips what it
+  // names and leaves the rest.
+  .patch('/:id/sharing', requireAuth, validate('json', siteSharingSchema), async c => {
+    const userId = c.get('userId')!;
+    const siteId = c.req.param('id');
+    const body = c.req.valid('json');
+    const db = c.get('db')!;
+
+    const manageSite = await checkManage(db, userId, siteId, 'update', c.get('tokenWorkspaceId'));
+    if (!manageSite.ok) return c.json({ error: manageSite.error }, manageSite.status);
+
+    await db
+      .update(sites)
+      .set({
+        ...(body.public !== undefined ? { public: body.public } : {}),
+        ...(body.publicGoals !== undefined ? { publicGoals: body.publicGoals } : {}),
+        ...(body.publicFunnels !== undefined ? { publicFunnels: body.publicFunnels } : {}),
+        ...(body.publicEvents !== undefined ? { publicEvents: body.publicEvents } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(sites.id, siteId));
+
+    const [updated] = await db
+      .select({
+        public: sites.public,
+        publicGoals: sites.publicGoals,
+        publicFunnels: sites.publicFunnels,
+        publicEvents: sites.publicEvents,
+      })
+      .from(sites)
+      .where(eq(sites.id, siteId));
     return c.json({ data: updated });
   })
 

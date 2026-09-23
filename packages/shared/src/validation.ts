@@ -153,6 +153,20 @@ export const updateSiteSchema = z.object({
   timezone: timezoneSchema.optional(),
 });
 
+/**
+ * Public dashboard settings. Every field is optional so the share modal can
+ * flip one switch at a time; section flags are stored even while the site is
+ * private, so turning sharing back on restores the owner's last choice.
+ */
+export const siteSharingSchema = z
+  .object({
+    public: z.boolean().optional(),
+    publicGoals: z.boolean().optional(),
+    publicFunnels: z.boolean().optional(),
+    publicEvents: z.boolean().optional(),
+  })
+  .refine(v => Object.values(v).some(x => x !== undefined), 'Nothing to update');
+
 /** Bulk "apply this timezone to sites", scoped to one workspace when given. */
 export const allSitesTimezoneSchema = z.object({
   timezone: timezoneSchema,

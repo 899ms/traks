@@ -151,7 +151,29 @@ export interface Site {
   domain: string;
   timezone: string;
   public: boolean;
+  publicGoals: boolean;
+  publicFunnels: boolean;
+  publicEvents: boolean;
   createdAt: string;
+}
+
+/** Which dashboard sections a public share page shows (traffic is always on). */
+export interface PublicSections {
+  goals: boolean;
+  funnels: boolean;
+  events: boolean;
+}
+
+/** What /share/<id> needs before any stats load: identity and sections. */
+export interface PublicSiteInfo {
+  id: string;
+  name: string;
+  domain: string;
+  favicon: string | null;
+  timezone: string;
+  sections: PublicSections;
+  /** Present when the funnels section is public. */
+  funnels?: FunnelDef[];
 }
 
 export interface StatsQueryParams {

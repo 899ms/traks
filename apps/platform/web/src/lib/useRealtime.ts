@@ -75,7 +75,13 @@ function normalize(raw: unknown): RealtimeData | null {
  * Both paths write into one react-query entry per filter set, so consumers
  * never care which delivered the latest value.
  */
-export function useRealtime(siteId: string, filters?: AnalyticsFilters): RealtimeState {
+export function useRealtime(
+  siteId: string,
+  filters?: AnalyticsFilters,
+  /** false = do nothing at all (no poll, no socket) - e.g. a public share
+   *  page, which has no session to open the live feed with. */
+  enabled = true
+): RealtimeState {
   const queryClient = useQueryClient();
   const [connected, setConnected] = useState(false);
   const connectedRef = useRef(false);
@@ -93,6 +99,7 @@ export function useRealtime(siteId: string, filters?: AnalyticsFilters): Realtim
     queryFn: () => api.getRealtime(siteId, filters),
     refetchInterval: connected ? false : POLL_INTERVAL_MS,
     staleTime: 15_000,
+    enabled,
   });
 
   // Filter change while connected: tell the socket; the DO answers with a
@@ -111,6 +118,7 @@ export function useRealtime(siteId: string, filters?: AnalyticsFilters): Realtim
   }, [key]);
 
   useEffect(() => {
+    if (!enabled) return;
     if (typeof window === 'undefined' || typeof WebSocket === 'undefined') return;
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -234,7 +242,7 @@ export function useRealtime(siteId: string, filters?: AnalyticsFilters): Realtim
         }
       }
     };
-  }, [siteId, queryClient]);
+  }, [siteId, queryClient, enabled]);
 
   return {
     data: normalize(query.data),
